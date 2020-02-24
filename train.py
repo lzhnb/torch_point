@@ -39,6 +39,11 @@ def parse_args():
             type=str, default="pointnet_cls",
             help="model name [default: pointnet_cls]"
         )
+    parser.add_argument(
+            "--task", dest="task",
+            type=str, default="cls",
+            help="model name [default: pointnet_cls]"
+        )
     # relative path
     parser.add_argument(
             "--log_dir", dest="log_dir",
@@ -61,25 +66,67 @@ class InfoLogger(object):
         self.logger.info(str)
         print(str)
 
+def set_dir(args):
+    timestr        = str(datetime.datetime.now().strftime("%Y-%m-%d_%H-%M"))
+    experiment_dir = Path("./log/")
+    experiment_dir.mkdir(exist_ok=True)
+    experiment_dir = experiment_dir.joinpath(args.task)
+    experiment_dir.mkdir(exist_ok=True)
+    if args.log_dir is None:
+        experiment_dir = experiment_dir.joinpath(timestr)
+    else:
+        experiment_dir = experiment_dir.joinpath(args.log_dir)
+    experiment_dir.mkdir(exist_ok=True)
+    checkpoints_dir = experiment_dir.joinpath("checkpoints/")
+    log_dir         = experiment_dir.joinpath("logs/")
+    checkpoints_dir.mkdir(exist_ok=True)
+    log_dir.mkdir(exist_ok=True)
+    return log_dir, checkpoints_dir
 
-def set_data_loader(args, cfg):
+def set_logger(log_dir, args):
+    logger       = logging.getLogger("Model")
+    logger.setLevel(logging.INFO)
+    formatter    = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    file_handler = logging.FileHandler("%s/%s.txt" % (log_dir, args.model))
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
+    logger.log_string("PARAMETER ...")
+    logger.log_string(args)
+    return logger
+
+def set_data_loader(logger, args, cfg):
     data_path     = args.data_dir
+    task          = args.task
     num_point     = cfg.NUM_POINT
     normal        = cfg.NORMAL
-    TRAIN_DATASET = ModelNetDataLoader(root=data_path, npoint=cfg.NUM_POINT, split="train",
-                                       normal_channel=normal)
-    TEST_DATASET  = ModelNetDataLoader(root=data_path, npoint=cfg.NUM_POINT, split="test",
-                                       normal_channel=normal)
+    if task == "cls":
+        TRAIN_DATASET = ModelNetDataLoader(root=data_path, npoint=cfg.NUM_POINT, split="train",
+                                        normal_channel=normal)
+        TEST_DATASET  = ModelNetDataLoader(root=data_path, npoint=cfg.NUM_POINT, split="test",
+                                        normal_channel=normal)
+        weights = None
+    elif task == "sem_seg":
+        TRAIN_DATASET = ModelNetDataLoader(root=data_path, npoint=cfg.NUM_POINT, split="train",
+                                        normal_channel=normal)
+        TEST_DATASET  = ModelNetDataLoader(root=data_path, npoint=cfg.NUM_POINT, split="test",
+                                        normal_channel=normal)
+        weights = torch.Tensor(TRAIN_DATASET.labelweights).cuda()
+    
+    logger.log_string("The number of training data is: %d" % len(TRAIN_DATASET))
+    logger.log_string("The number of test data is: %d" % len(TEST_DATASET))
     trainDataLoader = torch.utils.data.DataLoader(TRAIN_DATASET, batch_size=cfg.BATCH_SIZE, shuffle=True, num_workers=4)
     testDataLoader  = torch.utils.data.DataLoader(TEST_DATASET, batch_size=cfg.BATCH_SIZE, shuffle=False, num_workers=4)
-    return trainDataLoader, testDataLoader
+    return trainDataLoader, testDataLoader, weights
 
-def set_model(args, cfg):
+def set_model(DataLoader, args, cfg):
     num_class = cfg.NUM_CLASS
     normal    = cfg.NORMAL
+    task      = args.task
+    weights   = DataLoader[-1]
 
-    model      = net.PointNetl(num_class, normal_channel=normal).cuda()
-    criterion  = net.get_loss().cuda()
+    model      = net.PointNet(num_class, normal_channel=normal, task=task).cuda()
+    criterion  = net.get_loss(task=task, weights=weights).cuda()
 
     try:
         checkpoint  = torch.load("./checkpoints/best_model.pth")
@@ -127,7 +174,7 @@ def test(model, loader, num_class=40):
     return instance_acc, class_acc
 
 
-def train(DataLoader, ModelList, logger, args, cfg):
+def train(DataLoader, ModelList, logger, checkpoints_dir, args, cfg):
     """Train the model on `num_steps` batches
     Args:
         DataLoader: contains trainloader and testloader
@@ -138,7 +185,7 @@ def train(DataLoader, ModelList, logger, args, cfg):
     # set model loading
     model, criterion, optimizer, start_epoch, num_class = ModelList
     # set dataset loading
-    trainDataLoader, testDataLoader = DataLoader
+    trainDataLoader, testDataLoader, weights = DataLoader
     # set scheduler
     scheduler         = torch.optim.lr_scheduler.StepLR(optimizer, step_size=20, gamma=0.7)
     global_epoch      = 0
@@ -230,36 +277,15 @@ if __name__ == "__main__":
         os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
     
     # set the relative dir
-    timestr        = str(datetime.datetime.now().strftime("%Y-%m-%d_%H-%M"))
-    experiment_dir = Path("./log/")
-    experiment_dir.mkdir(exist_ok=True)
-    experiment_dir = experiment_dir.joinpath("classification")
-    experiment_dir.mkdir(exist_ok=True)
-    if args.log_dir is None:
-        experiment_dir = experiment_dir.joinpath(timestr)
-    else:
-        experiment_dir = experiment_dir.joinpath(args.log_dir)
-    experiment_dir.mkdir(exist_ok=True)
-    checkpoints_dir = experiment_dir.joinpath("checkpoints/")
-    log_dir         = experiment_dir.joinpath("logs/")
-    checkpoints_dir.mkdir(exist_ok=True)
-    log_dir.mkdir(exist_ok=True)
+    log_dir, checkpoints_dir = set_dir(args)
 
     # set the logger
-    logger       = logging.getLogger("Model")
-    logger.setLevel(logging.INFO)
-    formatter    = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-    file_handler = logging.FileHandler("%s/%s.txt" % (log_dir, args.model))
-    file_handler.setLevel(logging.INFO)
-    file_handler.setFormatter(formatter)
-    logger.addHandler(file_handler)
-    logger.log_string("PARAMETER ...")
-    logger.log_string(args)
+    logger = set_logger(log_dir, args)
 
     # set dataloading
     logger.log_string("Load dataset model and optimizer ...")
-    DataLoader = set_data_loader(args, cfg)
-    ModelList  = set_model(args, cfg)
+    DataLoader = set_data_loader(logger, args, cfg)
+    ModelList  = set_model(DataLoader, args, cfg)
 
     # start traing
-    train(DataLoader, ModelList, logger, args, cfg)
+    train(DataLoader, ModelList, logger, checkpoints_dir, args, cfg)
