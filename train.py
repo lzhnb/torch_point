@@ -14,6 +14,7 @@ import utils.data_utils as d_utils
 import model.net as net
 import model.data_loader as data_loader
 from model.config import Config
+from model.data_loader import ModelNetDataLoader
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -218,7 +219,6 @@ class TrainConfig(Config):
     LEARNING_RATE = 1e-3
     DECAY_RATE    = 1e-4
     OPTIMIZER     = "Adam"
-
 
 
 if __name__ == "__main__":

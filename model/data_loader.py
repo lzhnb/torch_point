@@ -1,90 +1,102 @@
-import random
+import numpy as np
+import warnings
 import os
-
-from PIL import Image
-from torch.utils.data import Dataset, DataLoader
-import torchvision.transforms as transforms
-
-# borrowed from http://pytorch.org/tutorials/advanced/neural_style_tutorial.html
-# and http://pytorch.org/tutorials/beginner/data_loading_tutorial.html
-# define a training image loader that specifies transforms on images. See documentation for more details.
-train_transformer = transforms.Compose([
-    transforms.Resize(64),  # resize the image to 64x64 (remove if images are already 64x64)
-    transforms.RandomHorizontalFlip(),  # randomly flip image horizontally
-    transforms.ToTensor()])  # transform it into a torch tensor
-
-# loader for evaluation, no horizontal flip
-eval_transformer = transforms.Compose([
-    transforms.Resize(64),  # resize the image to 64x64 (remove if images are already 64x64)
-    transforms.ToTensor()])  # transform it into a torch tensor
+from torch.utils.data import Dataset
+warnings.filterwarnings('ignore')
 
 
-class SIGNSDataset(Dataset):
+def pc_normalize(pc):
+    centroid = np.mean(pc, axis=0)
+    pc = pc - centroid
+    m = np.max(np.sqrt(np.sum(pc**2, axis=1)))
+    pc = pc / m
+    return pc
+
+def farthest_point_sample(point, npoint):
     """
-    A standard PyTorch definition of Dataset which defines the functions __len__ and __getitem__.
+    Input:
+        xyz: pointcloud data, [N, D]
+        npoint: number of samples
+    Return:
+        centroids: sampled pointcloud index, [npoint, D]
     """
-    def __init__(self, data_dir, transform):
-        """
-        Store the filenames of the jpgs to use. Specifies transforms to apply on images.
+    N, D = point.shape
+    xyz = point[:,:3]
+    centroids = np.zeros((npoint,))
+    distance = np.ones((N,)) * 1e10
+    farthest = np.random.randint(0, N)
+    for i in range(npoint):
+        centroids[i] = farthest
+        centroid = xyz[farthest, :]
+        dist = np.sum((xyz - centroid) ** 2, -1)
+        mask = dist < distance
+        distance[mask] = dist[mask]
+        farthest = np.argmax(distance, -1)
+    point = point[centroids.astype(np.int32)]
+    return point
 
-        Args:
-            data_dir: (string) directory containing the dataset
-            transform: (torchvision.transforms) transformation to apply on image
-        """
-        self.filenames = os.listdir(data_dir)
-        self.filenames = [os.path.join(data_dir, f) for f in self.filenames if f.endswith('.jpg')]
+class ModelNetDataLoader(Dataset):
+    def __init__(self, root,  npoint=1024, split='train', uniform=False, normal_channel=True, cache_size=15000):
+        self.root = root
+        self.npoints = npoint
+        self.uniform = uniform
+        self.catfile = os.path.join(self.root, 'modelnet40_shape_names.txt')
 
-        self.labels = [int(os.path.split(filename)[-1][0]) for filename in self.filenames]
-        self.transform = transform
+        self.cat = [line.rstrip() for line in open(self.catfile)]
+        self.classes = dict(zip(self.cat, range(len(self.cat))))
+        self.normal_channel = normal_channel
+
+        shape_ids = {}
+        shape_ids['train'] = [line.rstrip() for line in open(os.path.join(self.root, 'modelnet40_train.txt'))]
+        shape_ids['test'] = [line.rstrip() for line in open(os.path.join(self.root, 'modelnet40_test.txt'))]
+
+        assert (split == 'train' or split == 'test')
+        shape_names = ['_'.join(x.split('_')[0:-1]) for x in shape_ids[split]]
+        # list of (shape_name, shape_txt_file_path) tuple
+        self.datapath = [(shape_names[i], os.path.join(self.root, shape_names[i], shape_ids[split][i]) + '.txt') for i
+                         in range(len(shape_ids[split]))]
+        print('The size of %s data is %d'%(split,len(self.datapath)))
+
+        self.cache_size = cache_size  # how many data points to cache in memory
+        self.cache = {}  # from index to (point_set, cls) tuple
 
     def __len__(self):
-        # return size of dataset
-        return len(self.filenames)
+        return len(self.datapath)
 
-    def __getitem__(self, idx):
-        """
-        Fetch index idx image and labels from dataset. Perform transforms on image.
-
-        Args:
-            idx: (int) index in [0, 1, ..., size_of_dataset-1]
-
-        Returns:
-            image: (Tensor) transformed image
-            label: (int) corresponding label of image
-        """
-        image = Image.open(self.filenames[idx])  # PIL image
-        image = self.transform(image)
-        return image, self.labels[idx]
-
-
-def fetch_dataloader(types, data_dir, params):
-    """
-    Fetches the DataLoader object for each type in types from data_dir.
-
-    Args:
-        types: (list) has one or more of 'train', 'val', 'test' depending on which data is required
-        data_dir: (string) directory containing the dataset
-        params: (Params) hyperparameters
-
-    Returns:
-        data: (dict) contains the DataLoader object for each type in types
-    """
-    dataloaders = {}
-
-    for split in ['train', 'val', 'test']:
-        if split in types:
-            path = os.path.join(data_dir, "{}_signs".format(split))
-
-            # use the train_transformer if training data, else use eval_transformer without random flip
-            if split == 'train':
-                dl = DataLoader(SIGNSDataset(path, train_transformer), batch_size=params.batch_size, shuffle=True,
-                                        num_workers=params.num_workers,
-                                        pin_memory=params.cuda)
+    def _get_item(self, index):
+        if index in self.cache:
+            point_set, cls = self.cache[index]
+        else:
+            fn = self.datapath[index]
+            cls = self.classes[self.datapath[index][0]]
+            cls = np.array([cls]).astype(np.int32)
+            point_set = np.loadtxt(fn[1], delimiter=',').astype(np.float32)
+            if self.uniform:
+                point_set = farthest_point_sample(point_set, self.npoints)
             else:
-                dl = DataLoader(SIGNSDataset(path, eval_transformer), batch_size=params.batch_size, shuffle=False,
-                                num_workers=params.num_workers,
-                                pin_memory=params.cuda)
+                point_set = point_set[0:self.npoints,:]
 
-            dataloaders[split] = dl
+            point_set[:, 0:3] = pc_normalize(point_set[:, 0:3])
 
-    return dataloaders
+            if not self.normal_channel:
+                point_set = point_set[:, 0:3]
+
+            if len(self.cache) < self.cache_size:
+                self.cache[index] = (point_set, cls)
+
+        return point_set, cls
+
+    def __getitem__(self, index):
+        return self._get_item(index)
+
+
+
+
+if __name__ == '__main__':
+    import torch
+
+    data = ModelNetDataLoader('/data/modelnet40_normal_resampled/',split='train', uniform=False, normal_channel=True,)
+    DataLoader = torch.utils.data.DataLoader(data, batch_size=12, shuffle=True)
+    for point,label in DataLoader:
+        print(point.shape)
+        print(label.shape)
