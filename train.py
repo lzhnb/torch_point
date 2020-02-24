@@ -15,6 +15,7 @@ import model.net as net
 import model.data_loader as data_loader
 from model.config import Config
 from model.data_loader import ModelNetDataLoader
+from utils.train_utils import bn_momentum_adjust
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -173,7 +174,6 @@ def test(model, loader, num_class=40):
     instance_acc   = np.mean(mean_correct)
     return instance_acc, class_acc
 
-
 def train(DataLoader, ModelList, logger, checkpoints_dir, args, cfg):
     """Train the model on `num_steps` batches
     Args:
@@ -271,6 +271,9 @@ class TrainConfig(Config):
 if __name__ == "__main__":
     args = parse_args()
     cfg  = TrainConfig()
+    print("Called with args:")
+    print(args)
+    cfg.display()
 
     # use GPU if available
     if torch.cuda.is_available(): 
