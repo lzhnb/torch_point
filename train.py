@@ -1,28 +1,76 @@
 """Train the model"""
 
-import argparse
-import logging
-import os
+import os, shutil, argparse
+import logging, datetime
+from tqdm import tqdm
+from pathlib import Path
 
 import numpy as np
 import torch
 import torch.optim as optim
 from torch.autograd import Variable
-from tqdm import tqdm
 
-import utils
+import utils.data_utils as d_utils
 import model.net as net
 import model.data_loader as data_loader
 from evaluate import evaluate
 
-parser = argparse.ArgumentParser()
-parser.add_argument('--data_dir', default='data/64x64_SIGNS',
-                    help="Directory containing the dataset")
-parser.add_argument('--model_dir', default='experiments/base_model',
-                    help="Directory containing params.json")
-parser.add_argument('--restore_file', default=None,
-                    help="Optional, name of the file in --model_dir containing weights to reload before \
-                    training")  # 'best' or 'train'
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Arguments for PointNet training",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument(
+            "--batch_size", dest="batch_size",
+            type=int, default=24,
+            help="batch size in training [default: 24]"
+        )
+    parser.add_argument(
+            "--model", dest="model",
+            type=str, default="pointnet_cls",
+            help="model name [default: pointnet_cls]"
+        )
+    parser.add_argument(
+            "--epoch", dest="epoch",
+            type=int, default=200,
+            help="number of epoch in training [default: 200]"
+        )
+    parser.add_argument(
+            "--learning_rate", dest="learning_rate",
+            type=float, default=0.001,
+            help="learning rate in training [default: 0.001]"
+        )
+    parser.add_argument(
+            "--gpu", dest="gpu",
+            type=str, default="0",
+            help="specify gpu device [default: 0]"
+        )
+    parser.add_argument(
+            "--num_point", dest="num_point",
+            type=int, default=1024,
+            help="Point Number [default: 1024]"
+        )
+    parser.add_argument(
+            "--optimizer", dest="optimizer",
+            type=str, default="Adam",
+            help="optimizer for training [default: Adam]"
+        )
+    parser.add_argument(
+            "--log_dir", dest="log_dir",
+            type=str, default=None,
+            help="experiment root"
+        )
+    parser.add_argument(
+            "--decay_rate", dest="decay_rate",
+            type=float, default=1e-4,
+            help="decay rate [default: 1e-4]"
+        )
+    parser.add_argument(
+            "--normal", dest="normal",
+            type=bool, default=False, action="store_true",
+            help="Whether to use normal information [default: False]"
+        )
+    return parser.parse_args()
 
 
 def train(model, optimizer, loss_fn, dataloader, metrics, params):
@@ -76,13 +124,13 @@ def train(model, optimizer, loss_fn, dataloader, metrics, params):
                 # compute all metrics on this batch
                 summary_batch = {metric: metrics[metric](output_batch, labels_batch)
                                  for metric in metrics}
-                summary_batch['loss'] = loss.item()
+                summary_batch["loss"] = loss.item()
                 summ.append(summary_batch)
 
             # update the average loss
             loss_avg.update(loss.item())
 
-            t.set_postfix(loss='{:05.3f}'.format(loss_avg()))
+            t.set_postfix(loss="{:05.3f}".format(loss_avg()))
             t.update()
 
     # compute mean of all metrics in summary
@@ -111,7 +159,7 @@ def train_and_evaluate(model, train_dataloader, val_dataloader, optimizer, loss_
     # reload weights from restore_file if specified
     if restore_file is not None:
         restore_path = os.path.join(
-            args.model_dir, args.restore_file + '.pth.tar')
+            args.model_dir, args.restore_file + ".pth.tar")
         logging.info("Restoring parameters from {}".format(restore_path))
         utils.load_checkpoint(restore_path, model, optimizer)
 
@@ -127,13 +175,13 @@ def train_and_evaluate(model, train_dataloader, val_dataloader, optimizer, loss_
         # Evaluate for one epoch on validation set
         val_metrics = evaluate(model, loss_fn, val_dataloader, metrics, params)
 
-        val_acc = val_metrics['accuracy']
+        val_acc = val_metrics["accuracy"]
         is_best = val_acc >= best_val_acc
 
         # Save weights
-        utils.save_checkpoint({'epoch': epoch + 1,
-                               'state_dict': model.state_dict(),
-                               'optim_dict': optimizer.state_dict()},
+        utils.save_checkpoint({"epoch": epoch + 1,
+                               "state_dict": model.state_dict(),
+                               "optim_dict": optimizer.state_dict()},
                               is_best=is_best,
                               checkpoint=model_dir)
 
@@ -153,46 +201,168 @@ def train_and_evaluate(model, train_dataloader, val_dataloader, optimizer, loss_
         utils.save_dict_to_json(val_metrics, last_json_path)
 
 
-if __name__ == '__main__':
+def train(model, args):
+    """Train the model on `num_steps` batches
 
-    # Load the parameters from json file
-    args = parser.parse_args()
-    json_path = os.path.join(args.model_dir, 'params.json')
-    assert os.path.isfile(
-        json_path), "No json configuration file found at {}".format(json_path)
-    params = utils.Params(json_path)
+    Args:
+        model: (torch.nn.Module) the neural network
+        optimizer: (torch.optim) optimizer for parameters of model
+        loss_fn: a function that takes batch_output and batch_labels and computes the loss for the batch
+        dataloader: (DataLoader) a torch.utils.data.DataLoader object that fetches training data
+        metrics: (dict) a dictionary of functions that compute a metric using the output and labels of each batch
+        params: (Params) hyperparameters
+        num_steps: (int) number of batches to train on, each of size params.batch_size
+    """
+    pass
+
+
+
+def log_string(logger, str):
+    """collect logger and show
+    """
+    logger.info(str)
+    print(str)
+
+
+if __name__ == '__main__':
+    args = parse_args()
 
     # use GPU if available
-    params.cuda = torch.cuda.is_available()
+    if torch.cuda.is_available(): 
+        os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
+    
+    # set the relative dir
+    timestr        = str(datetime.datetime.now().strftime('%Y-%m-%d_%H-%M'))
+    experiment_dir = Path('./log/')
+    experiment_dir.mkdir(exist_ok=True)
+    experiment_dir = experiment_dir.joinpath('classification')
+    experiment_dir.mkdir(exist_ok=True)
+    if args.log_dir is None:
+        experiment_dir = experiment_dir.joinpath(timestr)
+    else:
+        experiment_dir = experiment_dir.joinpath(args.log_dir)
+    experiment_dir.mkdir(exist_ok=True)
+    checkpoints_dir = experiment_dir.joinpath('checkpoints/')
+    log_dir         = experiment_dir.joinpath('logs/')
+    checkpoints_dir.mkdir(exist_ok=True)
+    log_dir.mkdir(exist_ok=True)
 
-    # Set the random seed for reproducible experiments
-    torch.manual_seed(230)
-    if params.cuda:
-        torch.cuda.manual_seed(230)
+    # set the logger
+    logger       = logging.getLogger("Model")
+    logger.setLevel(logging.INFO)
+    formatter    = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    file_handler = logging.FileHandler('%s/%s.txt' % (log_dir, args.model))
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
+    log_string('PARAMETER ...')
+    log_string(args)
 
-    # Set the logger
-    utils.set_logger(os.path.join(args.model_dir, 'train.log'))
+    # set data loading
+    log_string('Load dataset ...')
+    DATA_PATH     = 'data/modelnet40_normal_resampled/'
+    TRAIN_DATASET = ModelNetDataLoader(root=DATA_PATH, npoint=args.num_point, split='train',
+                                       normal_channel=args.normal)
+    TEST_DATASET  = ModelNetDataLoader(root=DATA_PATH, npoint=args.num_point, split='test',
+                                       normal_channel=args.normal)
+    trainDataLoader = torch.utils.data.DataLoader(TRAIN_DATASET, batch_size=args.batch_size, shuffle=True, num_workers=4)
+    testDataLoader  = torch.utils.data.DataLoader(TEST_DATASET, batch_size=args.batch_size, shuffle=False, num_workers=4)
 
-    # Create the input data pipeline
-    logging.info("Loading the datasets...")
+    # set model loading
+    num_class = 40
+    MODEL = importlib.import_module(args.model)
+    shutil.copy('./models/%s.py' % args.model, str(experiment_dir))
+    shutil.copy('./models/pointnet_util.py', str(experiment_dir))
 
-    # fetch dataloaders
-    dataloaders = data_loader.fetch_dataloader(
-        ['train', 'val'], args.data_dir, params)
-    train_dl = dataloaders['train']
-    val_dl = dataloaders['val']
+    classifier = MODEL.get_model(num_class,normal_channel=args.normal).cuda()
+    criterion = MODEL.get_loss().cuda()
 
-    logging.info("- done.")
+    try:
+        checkpoint = torch.load(str(experiment_dir) + '/checkpoints/best_model.pth')
+        start_epoch = checkpoint['epoch']
+        classifier.load_state_dict(checkpoint['model_state_dict'])
+        log_string('Use pretrain model')
+    except:
+        log_string('No existing model, starting training from scratch...')
+        start_epoch = 0
 
-    # Define the model and optimizer
-    model = net.Net(params).cuda() if params.cuda else net.Net(params)
-    optimizer = optim.Adam(model.parameters(), lr=params.learning_rate)
 
-    # fetch loss function and metrics
-    loss_fn = net.loss_fn
-    metrics = net.metrics
+    if args.optimizer == 'Adam':
+        optimizer = torch.optim.Adam(
+            classifier.parameters(),
+            lr=args.learning_rate,
+            betas=(0.9, 0.999),
+            eps=1e-08,
+            weight_decay=args.decay_rate
+        )
+    else:
+        optimizer = torch.optim.SGD(classifier.parameters(), lr=0.01, momentum=0.9)
 
-    # Train the model
-    logging.info("Starting training for {} epoch(s)".format(params.num_epochs))
-    train_and_evaluate(model, train_dl, val_dl, optimizer, loss_fn, metrics, params, args.model_dir,
-                       args.restore_file)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=20, gamma=0.7)
+    global_epoch = 0
+    global_step = 0
+    best_instance_acc = 0.0
+    best_class_acc = 0.0
+    mean_correct = []
+
+    # start training
+    logger.info('Start training...')
+    for epoch in range(start_epoch,args.epoch):
+        log_string('Epoch %d (%d/%s):' % (global_epoch + 1, epoch + 1, args.epoch))
+
+        scheduler.step()
+        for batch_id, data in tqdm(enumerate(trainDataLoader, 0), total=len(trainDataLoader), smoothing=0.9):
+            points, target = data
+            points = points.data.numpy()
+            points = d_utils.random_point_dropout(points)
+            points[:,:, 0:3] = d_utils.random_scale_point_cloud(points[:,:, 0:3])
+            points[:,:, 0:3] = d_utils.shift_point_cloud(points[:,:, 0:3])
+            points = torch.Tensor(points)
+            target = target[:, 0]
+
+            points = points.transpose(2, 1)
+            points, target = points.cuda(), target.cuda()
+            optimizer.zero_grad()
+
+            classifier = classifier.train()
+            pred, trans_feat = classifier(points)
+            loss = criterion(pred, target.long(), trans_feat)
+            pred_choice = pred.data.max(1)[1]
+            correct = pred_choice.eq(target.long().data).cpu().sum()
+            mean_correct.append(correct.item() / float(points.size()[0]))
+            loss.backward()
+            optimizer.step()
+            global_step += 1
+
+        train_instance_acc = np.mean(mean_correct)
+        log_string('Train Instance Accuracy: %f' % train_instance_acc)
+
+
+        with torch.no_grad():
+            instance_acc, class_acc = test(classifier.eval(), testDataLoader)
+
+            if (instance_acc >= best_instance_acc):
+                best_instance_acc = instance_acc
+                best_epoch = epoch + 1
+
+            if (class_acc >= best_class_acc):
+                best_class_acc = class_acc
+            log_string('Test Instance Accuracy: %f, Class Accuracy: %f'% (instance_acc, class_acc))
+            log_string('Best Instance Accuracy: %f, Class Accuracy: %f'% (best_instance_acc, best_class_acc))
+
+            if (instance_acc >= best_instance_acc):
+                logger.info('Save model...')
+                savepath = str(checkpoints_dir) + '/best_model.pth'
+                log_string('Saving at %s'% savepath)
+                state = {
+                    'epoch': best_epoch,
+                    'instance_acc': instance_acc,
+                    'class_acc': class_acc,
+                    'model_state_dict': classifier.state_dict(),
+                    'optimizer_state_dict': optimizer.state_dict(),
+                }
+                torch.save(state, savepath)
+            global_epoch += 1
+
+    logger.info('End of training...')
+
