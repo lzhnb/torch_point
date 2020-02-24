@@ -1,0 +1,9 @@
+# dir
+__pycache__
+build
+
+# file
+*.pth*
+*.so
+*.zip
+cache.*
