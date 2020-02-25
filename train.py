@@ -92,6 +92,7 @@ def set_logger(log_dir, args):
     file_handler.setLevel(logging.INFO)
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
+    logger = InfoLogger(logger)
     logger.log_string("PARAMETER ...")
     logger.log_string(args)
     return logger
