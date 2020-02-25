@@ -196,7 +196,7 @@ def train(DataLoader, ModelList, logger, checkpoints_dir, args, cfg):
     mean_correct      = []
 
     # start training
-    logger.info("Start training...")
+    logger.log_string("Start training...")
     for epoch in range(start_epoch,args.epoch):
         logger.log_string("Epoch %d (%d/%s):" % (global_epoch + 1, epoch + 1, args.epoch))
 
@@ -214,8 +214,8 @@ def train(DataLoader, ModelList, logger, checkpoints_dir, args, cfg):
             points, target = points.cuda(), target.cuda()
             optimizer.zero_grad()
 
-            classifier = classifier.train()
-            pred, trans_feat = classifier(points)
+            classifier = model.train()
+            pred, trans_feat = model(points)
             loss = criterion(pred, target.long(), trans_feat)
             pred_choice = pred.data.max(1)[1]
             correct = pred_choice.eq(target.long().data).cpu().sum()
@@ -240,7 +240,7 @@ def train(DataLoader, ModelList, logger, checkpoints_dir, args, cfg):
             logger.log_string("Best Instance Accuracy: %f, Class Accuracy: %f"% (best_instance_acc, best_class_acc))
 
             if (instance_acc >= best_instance_acc):
-                logger.info("Save model...")
+                logger.log_string("Save model...")
                 savepath = str(checkpoints_dir) + "/best_model.pth"
                 logger.log_string("Saving at %s"% savepath)
                 state = {
@@ -253,7 +253,7 @@ def train(DataLoader, ModelList, logger, checkpoints_dir, args, cfg):
                 torch.save(state, savepath)
             global_epoch += 1
 
-    logger.info("End of training...")
+    logger.log_string("End of training...")
 
 
 class TrainConfig(Config):
