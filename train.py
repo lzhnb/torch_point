@@ -170,10 +170,11 @@ def test(model, loader, num_class=40):
         points, target = data
         target         = target[:, 0]
         points         = points.transpose(2, 1)
-        points, target = points.cuda(), target.cuda()
+        points         = points.cuda()
         classifier     = model.eval()
         pred, _        = classifier(points)
         pred_choice    = pred.data.max(1)[1]
+        target         = target.cuda(pred_choice.device)
         for cat in np.unique(target.cpu()):
             classacc          = pred_choice[target==cat].eq(target[target==cat].long().data).cpu().sum()
             class_acc[cat,0] += classacc.item()/float(points[target==cat].size()[0])

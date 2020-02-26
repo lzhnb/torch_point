@@ -1,6 +1,6 @@
 numpy
 Pillow
-torch>=1.2
+torch>=1.0
 torchvision
 tabulate
 tqdm
