@@ -22,20 +22,20 @@ class PointNet(nn.Module):
         self.task = task
         if self.task == "cls" and normal_channel:
             channel = 6
-        elif self.task == "sem_seg" and with_rgb:
+        elif self.task == "part_seg" and with_rgb:
             channel = 6
         else:
             channel = 3
         self.k       = num_class
         self.bn1     = nn.BatchNorm1d(512)
         self.bn2     = nn.BatchNorm1d(256)
+        self.dropout = nn.Dropout(p=0.4)
         if self.task == "cls":
             self.feat    = PointNetEncoder(global_feat=True, feature_transform=True, channel=channel)
             self.fc1     = nn.Linear(1024, 512)
             self.fc2     = nn.Linear(512, 256)
             self.fc3     = nn.Linear(256, self.k)
-            self.dropout = nn.Dropout(p=0.4)
-        elif self.task == "sem_seg":
+        elif self.task == "part_seg":
             self.feat  = PointNetEncoder(global_feat=False, feature_transform=True, channel=channel)
             self.conv1 = nn.Conv1d(1088, 512,    1)
             self.conv2 = nn.Conv1d(512,  256,    1)
@@ -55,7 +55,7 @@ class PointNet(nn.Module):
         """
         batchsize = x.size()[0]
         x, trans, trans_feat = self.feat(x)
-        # x:          [B, 1024]-(cls)
+        # x:          [B, 1024]    -(cls)
         # x:          [B, 1088， N]-(sem-seg)
         # trans:      [B, 3, 3]
         # trans_fear: [B, 64, 64]
@@ -63,8 +63,8 @@ class PointNet(nn.Module):
             x = F.relu(self.bn1(self.fc1(x)))               # x: [B, 512]
             x = F.relu(self.bn2(self.dropout(self.fc2(x)))) # x: [B, 256]
             x = self.fc3(x)                                 # x: [B, k]
-            x = F.log_softmax(x, dim=1)
-        elif self.task == "sem_seg":
+            x = F.log_softmax(x, dim=-1)
+        elif self.task == "part_seg":
             x = F.relu(self.bn1(self.conv1(x))) # x: [B, 512，N]
             x = F.relu(self.bn2(self.conv2(x))) # x: [B, 256, N]
             x = F.relu(self.bn3(self.conv3(x))) # x: [B, 128, N]

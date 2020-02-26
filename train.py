@@ -15,8 +15,8 @@ import utils.data_utils as d_utils
 import model.net as net
 import model.data_loader as data_loader
 from model.config import Config
-from model.data_loader import ModelNetDataLoader
-from utils.train_utils import bn_momentum_adjust
+from model.data_loader import ModelNetDataLoader, PartNormalDataset
+from utils.model_utils import bn_momentum_adjust
 from utils import gpu_utils
 
 def parse_args():
@@ -36,15 +36,25 @@ def parse_args():
             type=int, default=200,
             help="number of epoch in training [default: 200]"
         )
+    parser.add_argument(
+            "--step_size", dest="step_size",
+            type=int,  default=20,
+            help="Decay step for lr decay [default: every 20 epochs]"
+        )
+    parser.add_argument(
+            "--learning_rate", dest="learning_rate",
+            type=float, default=0.001,
+            help="learning rate in training [default: 0.001]"
+        )
     # train component
     parser.add_argument(
             "--model", dest="model",
             type=str, default="pointnet_cls",
-            help="model name [default: pointnet_cls]"
+            help="model name [default: pointnet]"
         )
     parser.add_argument(
             "--task", dest="task",
-            type=str, default="cls",
+            type=str, default=None,
             help="model name [default: pointnet_cls]"
         )
     # relative path
@@ -52,11 +62,6 @@ def parse_args():
             "--log_dir", dest="log_dir",
             type=str, default=None,
             help="experiment root"
-        )
-    parser.add_argument(
-            "--data_dir", dest="data_dir",
-            type=str, default="data/modelnet40_normal_resampled/",
-            help="dataset root"
         )
     return parser.parse_args()
 
@@ -69,16 +74,17 @@ class InfoLogger(object):
         self.logger.info(str)
         print(str)
 
-def set_dir(args):
+def set_dir(cfg):
     timestr        = str(datetime.datetime.now().strftime("%Y-%m-%d_%H-%M"))
     experiment_dir = Path("./log/")
     experiment_dir.mkdir(exist_ok=True)
-    experiment_dir = experiment_dir.joinpath(args.task)
+    experiment_dir = experiment_dir.joinpath(cfg.TASK)
     experiment_dir.mkdir(exist_ok=True)
-    if args.log_dir is None:
+    if cfg.LOG_DIR is None:
         experiment_dir = experiment_dir.joinpath(timestr)
     else:
-        experiment_dir = experiment_dir.joinpath(args.log_dir)
+        experiment_dir = experiment_dir.joinpath(cfg.LOG_DIR)
+        print("use experiment_dir: ", experiment_dir)
     experiment_dir.mkdir(exist_ok=True)
     checkpoints_dir = experiment_dir.joinpath("checkpoints/")
     log_dir         = experiment_dir.joinpath("logs/")
@@ -86,58 +92,70 @@ def set_dir(args):
     log_dir.mkdir(exist_ok=True)
     return log_dir, checkpoints_dir
 
-def set_logger(log_dir, args):
+def set_logger(log_dir, cfg):
     logger       = logging.getLogger("Model")
     logger.setLevel(logging.INFO)
     formatter    = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-    file_handler = logging.FileHandler("%s/%s.txt" % (log_dir, args.model))
+    file_handler = logging.FileHandler("{}/{}_{}.txt".format(log_dir, cfg.MODEL, cfg.TASK))
     file_handler.setLevel(logging.INFO)
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
     logger = InfoLogger(logger)
     logger.log_string("PARAMETER ...")
-    logger.log_string(args)
     return logger
 
-def set_data_loader(logger, args, cfg):
-    data_path     = args.data_dir
-    task          = args.task
-    num_point     = cfg.NUM_POINT
-    normal        = cfg.NORMAL
+def set_data_loader(logger, cfg):
+    task      = cfg.TASK
+    num_point = cfg.NUM_POINT
+    normal    = cfg.NORMAL
+    data_path = cfg.DATA_PATH
+    
+    # define default value
+    weights     = None
+    num_classes = None
+    num_part    = None
+
     if task == "cls":
         TRAIN_DATASET = ModelNetDataLoader(root=data_path, npoint=cfg.NUM_POINT, split="train",
                                         normal_channel=normal)
         TEST_DATASET  = ModelNetDataLoader(root=data_path, npoint=cfg.NUM_POINT, split="test",
                                         normal_channel=normal)
         weights = None
-    elif task == "sem_seg":
-        TRAIN_DATASET = ModelNetDataLoader(root=data_path, npoint=cfg.NUM_POINT, split="train",
-                                        normal_channel=normal)
-        TEST_DATASET  = ModelNetDataLoader(root=data_path, npoint=cfg.NUM_POINT, split="test",
-                                        normal_channel=normal)
-        weights = torch.Tensor(TRAIN_DATASET.labelweights).cuda()
+    elif task == "part_seg":
+        TRAIN_DATASET = PartNormalDataset(root=data_path, npoint=cfg.NUM_POINT, split="trainval",
+                                          normal_channel=normal)
+        TEST_DATASET  = PartNormalDataset(root=data_path, npoint=cfg.NUM_POINT, split="test",
+                                          normal_channel=normal)
+        num_classes = 16
+        num_part    = 50
+
     
     logger.log_string("The number of training data is: %d" % len(TRAIN_DATASET))
     logger.log_string("The number of test data is: %d" % len(TEST_DATASET))
-    trainDataLoader = torch.utils.data.DataLoader(TRAIN_DATASET, batch_size=cfg.BATCH_SIZE, shuffle=True, num_workers=4)
-    testDataLoader  = torch.utils.data.DataLoader(TEST_DATASET, batch_size=cfg.BATCH_SIZE, shuffle=False, num_workers=4)
-    return trainDataLoader, testDataLoader, weights
+    trainDataLoader = torch.utils.data.DataLoader(
+            TRAIN_DATASET, batch_size=cfg.BATCH_SIZE, shuffle=True, num_workers=cfg.NUM_WORKER
+        )
+    testDataLoader  = torch.utils.data.DataLoader(
+            TEST_DATASET, batch_size=cfg.BATCH_SIZE, shuffle=False, num_workers=cfg.NUM_WORKER
+        )
+    return trainDataLoader, testDataLoader, [weights, num_classes, num_part]
 
-def set_model(DataLoader, device_ids, args, cfg):
-    num_class = cfg.NUM_CLASS
-    normal    = cfg.NORMAL
-    num_gpu   = cfg.NUM_GPU
-    task      = args.task
-    weights   = DataLoader[-1]
+def set_model(DataLoader, device_ids, checkpoints_dir, cfg):
+    num_class  = cfg.NUM_CLASS
+    normal     = cfg.NORMAL
+    num_gpu    = cfg.NUM_GPU
+    task       = cfg.TASK
+    parameters = DataLoader[-1]
+    weights, num_classes, num_part = parameters
 
     model      = net.PointNet(num_class, normal_channel=normal, task=task).cuda(device_ids[0])
     criterion  = net.get_loss(task=task, weights=weights).cuda(device_ids[0])
 
     try:
-        checkpoint  = torch.load("./checkpoints/best_model.pth")
+        checkpoint  = torch.load(os.path.join(checkpoints_dir, "best_model.pth"))
         start_epoch = checkpoint["epoch"]
         model.load_state_dict(checkpoint["model_state_dict"])
-        logger.log_string("Use pretrain model")
+        logger.log_string("Use pretrain model, start from epoch: {}".format(start_epoch))
     except:
         logger.log_string("No existing model, starting training from scratch...")
         start_epoch = 0
@@ -186,20 +204,20 @@ def test(model, loader, num_class=40):
     instance_acc   = np.mean(mean_correct)
     return instance_acc, class_acc
 
-def train(DataLoader, ModelList, logger, checkpoints_dir, args, cfg):
+def train(DataLoader, ModelList, logger, checkpoints_dir, cfg):
     """Train the model on `num_steps` batches
     Args:
         DataLoader: contains trainloader and testloader
         ModelList:  contains model, criterion, optimizer and start_epoch
         logger:     logging context
-        args:       contains argmentations we input
     """
     # set model loading
     model, criterion, optimizer, start_epoch, num_class = ModelList
     # set dataset loading
     trainDataLoader, testDataLoader, weights = DataLoader
     # set scheduler
-    scheduler         = torch.optim.lr_scheduler.StepLR(optimizer, step_size=20, gamma=0.7)
+    scheduler         = torch.optim.lr_scheduler.StepLR(optimizer, step_size=cfg.STEP_SIZE, gamma=cfg.DECAY_RATE)
+
     global_epoch      = 0
     global_step       = 0
     best_instance_acc = 0.0
@@ -208,10 +226,12 @@ def train(DataLoader, ModelList, logger, checkpoints_dir, args, cfg):
 
     # start training
     logger.log_string("Start training...")
-    for epoch in range(start_epoch,args.epoch):
-        logger.log_string("Epoch %d (%d/%s):" % (global_epoch + 1, epoch + 1, args.epoch))
-
+    for epoch in range(start_epoch, cfg.EPOCH):
+        logger.log_string("Epoch %d (%d/%s):" % (global_epoch + 1, epoch + 1, cfg.EPOCH))
+        # laerning rate step
         scheduler.step()
+        # batch norm momentum step
+        momentum = cfg.MOMENTUM_ORIGINAL * (cfg.MOMENTUM_DECCAY ** (epoch//cfg.STEP_SIZE))
         for batch_id, data in tqdm(enumerate(trainDataLoader, 0), total=len(trainDataLoader), smoothing=0.9):
             points, target   = data
             points           = points.data.numpy()
@@ -276,27 +296,23 @@ def train(DataLoader, ModelList, logger, checkpoints_dir, args, cfg):
 
 class TrainConfig(Config):
     # dataset parameters
-    NUM_POINT = 1024
-    NUM_CLASS = 40
+    NUM_POINT  = 1024
+    NUM_CLASS  = 40
+    NUM_WORKER = 4
 
     # model parameters
     LEARNING_RATE = 1e-3
+    DECAY_RATE    = 0.7
     OPTIMIZER     = "Adam"
 
     # GPU setting
     BATCH_SIZE_PER_GPU = 96
-    _NUM_GPU = 1
+    NUM_GPU = 1
 
 
-if __name__ == "__main__":
-    args = parse_args()
-    cfg  = TrainConfig()
-    print("Called with args:")
-    print(args)
-    cfg.display()
-
-    # use GPU if available
-    if torch.cuda.is_available():
+def update_cfg_by_args(args, cfg):
+    # update gpu
+    if torch.cuda.is_available(): # use GPU if available
         if args.gpu == None:
             device_ids = gpu_utils.supervise_gpu(nb_gpu=cfg.NUM_GPU)
             gpu_list   = [str(i) for i in device_ids]
@@ -307,19 +323,39 @@ if __name__ == "__main__":
             cfg.NUM_GPU = len(device_ids)
         os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(gpu_list)
         print("set CUDA_VISIBLE_DEVICES: ", ",".join(gpu_list))
-        print("TRUE_BATCH_SIZE: ", cfg.BATCH_SIZE)
-
     
+    cfg.EPOCH         = args.epoch
+    cfg.STEP_SIZE     = args.step_size
+    cfg.LEARNING_RATE = args.learning_rate
+
+    cfg.TASK    = args.task
+    cfg.MODEL   = args.model
+    cfg.LOG_DIR = args.log_dir
+    
+    cfg.display()
+    return device_ids
+
+
+
+if __name__ == "__main__":
+    args = parse_args()
+    cfg  = TrainConfig()
+    print("Called with args:")
+    print(args)
+
+    # update cfg according to args
+    device_ids = update_cfg_by_args(args, cfg)
+
     # set the relative dir
-    log_dir, checkpoints_dir = set_dir(args)
+    log_dir, checkpoints_dir = set_dir(cfg)
 
     # set the logger
-    logger = set_logger(log_dir, args)
+    logger = set_logger(log_dir, cfg)
 
     # set dataloading
     logger.log_string("Load dataset model and optimizer ...")
-    DataLoader = set_data_loader(logger, args, cfg)
-    ModelList  = set_model(DataLoader, device_ids, args, cfg)
+    DataLoader = set_data_loader(logger, cfg)
+    ModelList  = set_model(DataLoader, device_ids, checkpoints_dir, cfg)
 
     # start traing
-    train(DataLoader, ModelList, logger, checkpoints_dir, args, cfg)
+    train(DataLoader, ModelList, logger, checkpoints_dir, cfg)
