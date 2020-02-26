@@ -284,7 +284,7 @@ class TrainConfig(Config):
     OPTIMIZER     = "Adam"
 
     # GPU setting
-    BATCH_SIZE_PER_GPU = 150
+    BATCH_SIZE_PER_GPU = 96
     _NUM_GPU = 1
 
 
