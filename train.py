@@ -7,6 +7,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+import torch.nn as nn
 import torch.optim as optim
 from torch.autograd import Variable
 
@@ -16,6 +17,7 @@ import model.data_loader as data_loader
 from model.config import Config
 from model.data_loader import ModelNetDataLoader
 from utils.train_utils import bn_momentum_adjust
+from utils import gpu_utils
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -25,8 +27,8 @@ def parse_args():
     # data parameters
     parser.add_argument(
             "--gpu", dest="gpu",
-            type=str, default="0",
-            help="specify gpu device [default: 0]"
+            type=str, default=None,
+            help="specify gpu device [default: None] type:1, 1,2(divide by ',')"
         )
     # training parameters
     parser.add_argument(
@@ -121,14 +123,15 @@ def set_data_loader(logger, args, cfg):
     testDataLoader  = torch.utils.data.DataLoader(TEST_DATASET, batch_size=cfg.BATCH_SIZE, shuffle=False, num_workers=4)
     return trainDataLoader, testDataLoader, weights
 
-def set_model(DataLoader, args, cfg):
+def set_model(DataLoader, device_ids, args, cfg):
     num_class = cfg.NUM_CLASS
     normal    = cfg.NORMAL
+    num_gpu   = cfg.NUM_GPU
     task      = args.task
     weights   = DataLoader[-1]
 
-    model      = net.PointNet(num_class, normal_channel=normal, task=task).cuda()
-    criterion  = net.get_loss(task=task, weights=weights).cuda()
+    model      = net.PointNet(num_class, normal_channel=normal, task=task).cuda(device_ids[0])
+    criterion  = net.get_loss(task=task, weights=weights).cuda(device_ids[0])
 
     try:
         checkpoint  = torch.load("./checkpoints/best_model.pth")
@@ -150,6 +153,13 @@ def set_model(DataLoader, args, cfg):
         )
     else:
         optimizer = torch.optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
+
+    # if num_gpu > 1:
+    logger.log_string("Use {} GPU".format(num_gpu))
+    assert torch.cuda.device_count() > num_gpu
+    model     = nn.DataParallel(model, device_ids=device_ids)
+    criterion = nn.DataParallel(criterion, device_ids=device_ids)
+    
     return [model, criterion, optimizer, start_epoch, num_class]
 
 
@@ -211,14 +221,21 @@ def train(DataLoader, ModelList, logger, checkpoints_dir, args, cfg):
             target           = target[:, 0]
 
             points = points.transpose(2, 1)
-            points, target = points.cuda(), target.cuda()
+            try:
+                points = points.cuda(model.output_device)
+                target = target.cuda(model.output_device)
+            except:
+                points = points.cuda()
+                target = target.cuda()
             optimizer.zero_grad()
 
-            classifier = model.train()
+            classifier       = model.train()
             pred, trans_feat = model(points)
-            loss = criterion(pred, target.long(), trans_feat)
-            pred_choice = pred.data.max(1)[1]
-            correct = pred_choice.eq(target.long().data).cpu().sum()
+            loss             = torch.sum(criterion(pred, target.long(), trans_feat))
+            pred_choice      = pred.data.max(1)[1]
+            if target.device != pred_choice.device:
+                pred_choice.to(target.device)
+            correct          = pred_choice.eq(target.long().data).cpu().sum()
             mean_correct.append(correct.item() / float(points.size()[0]))
             loss.backward()
             optimizer.step()
@@ -262,11 +279,12 @@ class TrainConfig(Config):
     NUM_CLASS = 40
 
     # model parameters
-    NORMAL        = True
-    BATCH_SIZE    = 24
     LEARNING_RATE = 1e-3
-    DECAY_RATE    = 1e-4
     OPTIMIZER     = "Adam"
+
+    # GPU setting
+    BATCH_SIZE_PER_GPU = 150
+    _NUM_GPU = 1
 
 
 if __name__ == "__main__":
@@ -277,8 +295,19 @@ if __name__ == "__main__":
     cfg.display()
 
     # use GPU if available
-    if torch.cuda.is_available(): 
-        os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
+    if torch.cuda.is_available():
+        if args.gpu == None:
+            device_ids = gpu_utils.supervise_gpu(nb_gpu=cfg.NUM_GPU)
+            gpu_list   = [str(i) for i in device_ids]
+        else:
+            gpu_list    = args.gpu
+            gpu_list    = [i for i in gpu_list.split(",")]
+            device_ids  = [int(i) for i in gpu_list]
+            cfg.NUM_GPU = len(device_ids)
+        os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(gpu_list)
+        print("set CUDA_VISIBLE_DEVICES: ", ",".join(gpu_list))
+        print("TRUE_BATCH_SIZE: ", cfg.BATCH_SIZE)
+
     
     # set the relative dir
     log_dir, checkpoints_dir = set_dir(args)
@@ -289,7 +318,7 @@ if __name__ == "__main__":
     # set dataloading
     logger.log_string("Load dataset model and optimizer ...")
     DataLoader = set_data_loader(logger, args, cfg)
-    ModelList  = set_model(DataLoader, args, cfg)
+    ModelList  = set_model(DataLoader, device_ids, args, cfg)
 
     # start traing
     train(DataLoader, ModelList, logger, checkpoints_dir, args, cfg)

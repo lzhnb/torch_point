@@ -1,6 +1,7 @@
 numpy
 Pillow
 torch>=1.2
+torchvision
 tabulate
 tqdm
-torchvision
+gpustat
