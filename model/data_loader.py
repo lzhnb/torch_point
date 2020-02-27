@@ -1,6 +1,6 @@
 import numpy as np
 import warnings
-import os
+import os, json
 from torch.utils.data import Dataset
 warnings.filterwarnings('ignore')
 
@@ -36,7 +36,7 @@ def farthest_point_sample(point, npoint):
     return point
 
 class ModelNetDataLoader(Dataset):
-    def __init__(self, root,  npoint=1024, split='train', uniform=False, normal_channel=True, cache_size=15000):
+    def __init__(self, root,  npoints=1024, split='train', uniform=False, normal_channel=True, cache_size=15000):
         self.root    = root
         self.npoints = npoint
         self.uniform = uniform

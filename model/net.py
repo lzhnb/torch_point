@@ -60,7 +60,7 @@ class PointNet(nn.Module):
             self.bn2   = nn.BatchNorm1d(256)
             self.bn3   = nn.BatchNorm1d(128)
 
-    def forward(self, data):
+    def forward(self, input_data):
         """
         Args:
             x: contains a batch of point clouds, of dimension BxNxD .
@@ -70,7 +70,7 @@ class PointNet(nn.Module):
             trans_feat: the convert matrix for STN
         """
         if self.task == "cls":
-            x = data
+            x = input_data
             batchsize = x.size()[0]
             x, trans, trans_feat = self.feat(x)
             # x:          [B, 1024]
@@ -80,10 +80,11 @@ class PointNet(nn.Module):
             x = F.relu(self.bn2(self.dropout(self.fc2(x)))) # x: [B, 256]
             x = self.fc3(x)                                 # x: [B, k]
             x = F.log_softmax(x, dim=-1)
+        
         elif self.task == "part_seg":
-            x, label = data
+            x, label = input_data
             B, D, N  = x.size()
-            x, trans, trans_feat  = self.feat(data) # x: 
+            x, trans, trans_feat  = self.feat(x) # x: 
             # x:          [B, 4944, N]
             # trans:      [B, 3, 3]
             # trans_feat: [B, 128, 128]

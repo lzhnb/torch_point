@@ -35,6 +35,7 @@ class Config(object):
     OPTIMIZER          = origin_property("OPTIMIZER")
     MOMENTUM_ORIGINAL  = origin_property("MOMENTUM_ORIGINAL")
     MOMENTUM_DECCAY    = origin_property("MOMENTUM_DECCAY")
+    MOMENTUM_CLIP      = origin_property("MOMENTUM_CLIP")
     BATCH_SIZE_PER_GPU = origin_property("BATCH_SIZE_PER_GPU")
     MODEL              = origin_property("MODEL")
     
@@ -42,6 +43,7 @@ class Config(object):
     # dataset parameters
     NUM_POINT  = 1024
     NUM_CLASS  = 40
+    NUM_PART   = 50
     NUM_WORKER = 4
 
     # model parameters
@@ -55,6 +57,7 @@ class Config(object):
     
     MOMENTUM_ORIGINAL = 0.1
     MOMENTUM_DECCAY   = 0.5
+    MOMENTUM_CLIP     = 0.01
 
     # GPU setting
     BATCH_SIZE_PER_GPU = 24
@@ -89,6 +92,11 @@ class Config(object):
             "cls":      os.path.join(os.getcwd(), "data", "modelnet40_normal_resampled"),
             "part_seg": os.path.join(os.getcwd(), "data", "shapenetcore_partanno_segmentation_benchmark_v0"),
         }
+    # task -> show index
+    SHOW_INDEX = {
+            "cls":      "Accuracy",
+            "part_seg": "mIOU acc",
+        }
 
     def __init__(self):
         self.set_label_to_cat()
@@ -108,11 +116,10 @@ class Config(object):
         """Display Configuration values."""
         print("\nConfigurations:")
         for a in dir(self):
-            if a in ["SEG_LABEL_TO_CAT", "SEG_CLASSES", "TASK_DATA_PATH"]: continue
+            if a in ["SEG_LABEL_TO_CAT", "SEG_CLASSES", "TASK_DATA_PATH", "SHOW_INDEX"]: continue
             elif not a.startswith("_") and not callable(getattr(self, a)):
                 print("{:30} {}".format(a, getattr(self, a)))
         print("\n")
-
 
     # change relative
     @property
@@ -141,6 +148,13 @@ class Config(object):
 
         self.__TASK     = value
         self.DATA_PATH = self.TASK_DATA_PATH[value]
+        if value == "cls":
+            self.NUM_CLASS = 40
+            self.NUM_POINT = 1024
+        elif value == "part_seg":
+            self.NUM_CLASS = 16
+            self.NUM_PART  = 50
+            self.NUM_POINT = 2500
 
 
 
