@@ -23,13 +23,21 @@ class Config(object):
     sub-class that inherits from this one and override properties
     that need to be changed.
     """
-    # the values can be gotten from args
-    EPOCH         = origin_property('EPOCH')
-    STEP_SIZE     = origin_property('STEP_SIZE')
-    LEARNING_RATE = origin_property('LEARNING_RATE')
-
-    MODEL   = origin_property('MODEL')
-    LOG_DIR = origin_property('LOG_DIR')
+    # define as decorator
+    NUM_POINT          = origin_property("NUM_POINT")
+    NUM_CLASS          = origin_property("NUM_CLASS")
+    NUM_WORKER         = origin_property("NUM_WORKER")
+    EPOCH              = origin_property("EPOCH")
+    STEP_SIZE          = origin_property("STEP_SIZE")
+    LEARNING_RATE      = origin_property("LEARNING_RATE")
+    LOG_DIR            = origin_property("LOG_DIR")
+    DECAY_RATE         = origin_property("DECAY_RATE")
+    OPTIMIZER          = origin_property("OPTIMIZER")
+    MOMENTUM_ORIGINAL  = origin_property("MOMENTUM_ORIGINAL")
+    MOMENTUM_DECCAY    = origin_property("MOMENTUM_DECCAY")
+    BATCH_SIZE_PER_GPU = origin_property("BATCH_SIZE_PER_GPU")
+    MODEL              = origin_property("MODEL")
+    
 
     # dataset parameters
     NUM_POINT  = 1024
@@ -50,7 +58,7 @@ class Config(object):
 
     # GPU setting
     BATCH_SIZE_PER_GPU = 24
-    __NUM_GPU            = 1
+    __NUM_GPU          = 1
 
     # ShapeNet set
     SEG_CLASSES = {

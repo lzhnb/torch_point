@@ -4,6 +4,7 @@ import os, shutil, argparse
 import logging, datetime
 from tqdm import *
 from pathlib import Path
+from collections import OrderedDict
 
 import numpy as np
 import torch
@@ -140,6 +141,19 @@ def set_data_loader(logger, cfg):
         )
     return trainDataLoader, testDataLoader, [weights, num_classes, num_part]
 
+def _check_module_prefix(model_state_dict):
+    """ nn.Dataparallel will output model_state_dict whose keys
+    with '.module' prefix, it will fail to load this model_sta-
+    te_dict. So we should check the prefix and remove it.
+    """
+    temp = OrderedDict()
+    for key in model_state_dict.keys():
+        if key[:6] == "module":
+            temp[key[7:]] = model_state_dict[key]
+        else:
+            temp[key] = model_state_dict[key]
+    return temp
+
 def set_model(DataLoader, device_ids, checkpoints_dir, cfg):
     num_class  = cfg.NUM_CLASS
     normal     = cfg.NORMAL
@@ -151,14 +165,16 @@ def set_model(DataLoader, device_ids, checkpoints_dir, cfg):
     model      = net.PointNet(num_class, normal_channel=normal, task=task).cuda(device_ids[0])
     criterion  = net.get_loss(task=task, weights=weights).cuda(device_ids[0])
 
-    try:
-        checkpoint  = torch.load(os.path.join(checkpoints_dir, "best_model.pth"))
-        start_epoch = checkpoint["epoch"]
-        model.load_state_dict(checkpoint["model_state_dict"])
+    if os.path.exists(os.path.join(checkpoints_dir, "best_model.pth")):
+        checkpoint       = torch.load(os.path.join(checkpoints_dir, "best_model.pth"))
+        start_epoch      = checkpoint["epoch"]
+        model_state_dict = _check_module_prefix(checkpoint["model_state_dict"])
+        model.load_state_dict(model_state_dict)
         logger.log_string("Use pretrain model, start from epoch: {}".format(start_epoch))
-    except:
+    else:
         logger.log_string("No existing model, starting training from scratch...")
         start_epoch = 0
+
 
     # set optimizer
     if cfg.OPTIMIZER == "Adam":
@@ -239,15 +255,11 @@ def train(DataLoader, ModelList, logger, checkpoints_dir, cfg):
             points[:,:, 0:3] = d_utils.random_scale_point_cloud(points[:,:, 0:3])
             points[:,:, 0:3] = d_utils.shift_point_cloud(points[:,:, 0:3])
             points           = torch.Tensor(points)
+            points           = points.transpose(2, 1)
             target           = target[:, 0]
 
-            points = points.transpose(2, 1)
-            try:
-                points = points.cuda(model.output_device)
-                target = target.cuda(model.output_device)
-            except:
-                points = points.cuda()
-                target = target.cuda()
+            points = points.cuda(model.output_device)
+            target = target.cuda(model.output_device)
             optimizer.zero_grad()
 
             classifier       = model.train()
