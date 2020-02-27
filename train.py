@@ -249,9 +249,14 @@ def train(DataLoader, ModelList, logger, checkpoints_dir, cfg):
         # batch norm momentum step
         momentum = cfg.MOMENTUM_ORIGINAL * (cfg.MOMENTUM_DECCAY ** (epoch//cfg.STEP_SIZE))
         for batch_id, data in tqdm(enumerate(trainDataLoader, 0), total=len(trainDataLoader), smoothing=0.9):
-            points, target   = data
-            points           = points.data.numpy()
-            points           = d_utils.random_point_dropout(points)
+            if cfg.TASK == "cls":
+                points, target = data
+                points         = points.data.numpy()
+                points         = d_utils.random_point_dropout(points)
+            elif cfg.TASK == "part_seg":
+                points, label, target = data
+                points                = points.data.numpy()
+            
             points[:,:, 0:3] = d_utils.random_scale_point_cloud(points[:,:, 0:3])
             points[:,:, 0:3] = d_utils.shift_point_cloud(points[:,:, 0:3])
             points           = torch.Tensor(points)
@@ -260,10 +265,14 @@ def train(DataLoader, ModelList, logger, checkpoints_dir, cfg):
 
             points = points.cuda(model.output_device)
             target = target.cuda(model.output_device)
+            if cfg.TASK == "part_seg": label = label.cuda(model.output_device)
             optimizer.zero_grad()
 
             classifier       = model.train()
-            pred, trans_feat = model(points)
+            if cfg.TASK == "cls":
+                pred, trans_feat = model(points)
+            elif cfg.TASK == "part_seg":
+                seg_pred, trans_feat = model(points)
             loss             = torch.sum(criterion(pred, target.long(), trans_feat))
             pred_choice      = pred.data.max(1)[1]
             if target.device != pred_choice.device:
