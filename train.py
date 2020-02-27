@@ -50,13 +50,13 @@ def parse_args():
     # train component
     parser.add_argument(
             "--model", dest="model",
-            type=str, default="pointnet_cls",
+            type=str, default="pointnet",
             help="model name [default: pointnet]"
         )
     parser.add_argument(
             "--task", dest="task",
             type=str, default=None,
-            help="model name [default: pointnet_cls]"
+            help="task in [cls, part_seg]"
         )
     # relative path
     parser.add_argument(
@@ -224,22 +224,24 @@ def test(model, loader, logger, cfg=None):
         total_correct_class = [0 for _ in range(cfg.NUM_PART)]
         shape_ious          = {cat: [] for cat in cfg.SEG_CLASSES.keys()}
 
-        for batch_id, (points, label, target) in tqdm(enumerate(testDataLoader), total=len(testDataLoader), smoothing=0.9):
+        for batch_id, (points, label, target) in tqdm(enumerate(loader), total=len(loader), smoothing=0.9):
             batch_size, npoint, _ = points.size()
             points          = points.transpose(2, 1)
-            target          = target[:, 0]
             points          = points.float().cuda(model.output_device)
             label           = label.long().cuda(model.output_device)
             target          = target.long().cuda(model.output_device)
             classifier      = model.eval()
-            pred, _         = classifier(points, to_categorical(label, cfg.NUM_CLASS))
-            pred            = pred.cpu().data_numpy()
+            to_cat          = to_categorical(label, cfg.NUM_CLASS).to(model.output_device)
+            pred, _         = classifier([points, to_cat])
+            pred            = pred.cpu().data.numpy()
             pred_logits     = pred
             target          = target.cpu().data.numpy()
             for i in range(batch_size):
                 cat        = cfg.SEG_LABEL_TO_CAT[target[i, 0]]
                 logits     = pred_logits[i, :, :]
-                pred[i, :] = np.argmax(logits[:, cfg.SEG_CLASSES[cat]], 1) + cfg.SEG_CLASSES[cat][0]
+                pred[i, :] = np.expand_dims(
+                        np.argmax(logits[:, cfg.SEG_CLASSES[cat]], 1) + cfg.SEG_CLASSES[cat][0], axis=-1
+                    )
             correct = np.sum(pred == target)
             total_correct += correct
             total_seen += (batch_size * cfg.NUM_POINT)
@@ -257,8 +259,12 @@ def test(model, loader, logger, cfg=None):
                        np.sum(segp == l) == 0:  # part is not present, no prediction as well
                         part_ious[l - cfg.SEG_CLASSES[cat][0]] = 1.0
                     else:
-                        part_ious[l - cfg.SEG_CLASSES[cat][0]] = np.sum((segl == l) & (segp == l)) / \
-                            float(np.sum((segl == l) | (segp == l)))
+                        part_ious[l - cfg.SEG_CLASSES[cat][0]] = \
+                            np.sum(
+                                    np.expand_dims((segl == l), axis=-1) & (segp == l) / \
+                                    float(np.sum(np.expand_dims((segl == l), axis=-1) | (segp == l)))
+                                )
+                                
                 shape_ious[cat].append(np.mean(part_ious))
 
             all_shape_ious = []
@@ -277,9 +283,6 @@ def test(model, loader, logger, cfg=None):
             test_metrics['instance_avg_iou'] = np.mean(all_shape_ious)
 
         return test_metrics
-
-
-
 
 
 def train(DataLoader, ModelList, logger, checkpoints_dir, cfg):
@@ -337,7 +340,8 @@ def train(DataLoader, ModelList, logger, checkpoints_dir, cfg):
             if cfg.TASK == "cls":
                 pred, trans_feat = model(points)
             elif cfg.TASK == "part_seg":
-                pred, trans_feat = model(points, to_categorical(label, cfg.NUM_CLASS))
+                to_cat           = to_categorical(label, cfg.NUM_CLASS).to(model.output_device)
+                pred, trans_feat = model([points, to_cat])
                 pred             = pred.contiguous().view(-1, cfg.NUM_PART)
             target      = target.view(-1, 1)[:, 0]
             loss        = torch.sum(criterion(pred, target.long(), trans_feat))
@@ -345,11 +349,10 @@ def train(DataLoader, ModelList, logger, checkpoints_dir, cfg):
             if target.device != pred_choice.device:
                 pred_choice.to(target.device)
             
+            correct = pred_choice.eq(target.long().data).cpu().sum()
             if cfg.TASK == "cls":
-                correct = pred_choice.eq(target.long().data).cpu().sum()
                 mean_correct.append(correct.item() / cfg.BATCH_SIZE)
             elif cfg.TASK == "part_seg":
-                correct = pred_choice.eq(target.data).cpu().sum()
                 mean_correct.append(correct.item() / (cfg.BATCH_SIZE*cfg.NUM_POINT))
 
             loss.backward()
@@ -424,24 +427,10 @@ class TrainConfig(Config):
     OPTIMIZER     = "Adam"
 
     # GPU setting
-    BATCH_SIZE_PER_GPU = 96
     NUM_GPU = 1
 
 
 def update_cfg_by_args(args, cfg):
-    # update gpu
-    if torch.cuda.is_available(): # use GPU if available
-        if args.gpu == None:
-            device_ids = gpu_utils.supervise_gpu(nb_gpu=cfg.NUM_GPU)
-            gpu_list   = [str(i) for i in device_ids]
-        else:
-            gpu_list    = args.gpu
-            gpu_list    = [i for i in gpu_list.split(",")]
-            device_ids  = [int(i) for i in gpu_list]
-            cfg.NUM_GPU = len(device_ids)
-        os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(gpu_list)
-        print("set CUDA_VISIBLE_DEVICES: ", ",".join(gpu_list))
-    
     cfg.EPOCH         = args.epoch
     cfg.STEP_SIZE     = args.step_size
     cfg.LEARNING_RATE = args.learning_rate
@@ -449,6 +438,22 @@ def update_cfg_by_args(args, cfg):
     cfg.TASK    = args.task
     cfg.MODEL   = args.model
     cfg.LOG_DIR = args.log_dir
+
+    # update gpu
+    if torch.cuda.is_available(): # use GPU if available
+        if args.gpu == None:
+            device_ids = gpu_utils.supervise_gpu(nb_gpu=cfg.NUM_GPU)
+            gpu_list   = [str(i) for i in device_ids]
+            cfg.NUM_GPU = 1
+        else:
+            gpu_list    = args.gpu
+            gpu_list    = [i for i in gpu_list.split(",")]
+            device_ids  = [int(i) for i in gpu_list]
+            cfg.NUM_GPU = len(device_ids)
+        
+        os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(gpu_list)
+        print("set CUDA_VISIBLE_DEVICES: ", ",".join(gpu_list))
+    
     
     cfg.display()
     return device_ids

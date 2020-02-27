@@ -84,7 +84,7 @@ class PointNet(nn.Module):
         elif self.task == "part_seg":
             x, label = input_data
             B, D, N  = x.size()
-            x, trans, trans_feat  = self.feat(x) # x: 
+            x, trans, trans_feat  = self.feat([x, label]) # x: 
             # x:          [B, 4944, N]
             # trans:      [B, 3, 3]
             # trans_feat: [B, 128, 128]
@@ -92,7 +92,7 @@ class PointNet(nn.Module):
             x = F.relu(self.bn2(self.conv2(x)))     # x: [B, 256, N]
             x = F.relu(self.bn3(self.conv3(x)))     # x: [B, 128, N]
             x = self.conv4(x)                       # x: [B, part_num, N]
-            x = x.transpose(2, 1).contigous         # x: [B, N, part_num]
+            x = x.transpose(2, 1).contiguous()      # x: [B, N, part_num]
             x = F.log_softmax(x.view(-1, self.part_num), dim=-1) # x:[B*N, part_num]
             x = x.view(B, N, self.part_num)         # x: [B, N, part_num]
 

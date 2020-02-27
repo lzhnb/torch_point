@@ -116,7 +116,7 @@ class PointNetEncoder(nn.Module):
     """
     def __init__(self, global_feat=True, feature_transform=False, channel=3, type="base"):
         super(PointNetEncoder, self).__init__()
-        self.type  = "base"
+        self.type  = type
         self.stn   = STN3d(channel)
         self.conv1 = nn.Conv1d(channel, 64,   1)
         self.conv2 = nn.Conv1d(64,      128,  1)
@@ -186,7 +186,7 @@ class PointNetEncoder(nn.Module):
             out3 = F.relu(self.bn3(self.conv3(out2)))              # out3: [B, 128, N]
             trans_out, trans_feat = self._fstn(out3)               # trans_out: [B, 128, N] trans_feat: [B, 128, 128]
             out4 = F.relu(self.bn4(self.conv4(trans_out)))         # out4: [B, 512, N]
-            out5 = self.bn5(self.conv5(x))                         # out5: [B, 2048, N]
+            out5 = self.bn5(self.conv5(out4))                      # out5: [B, 2048, N]
             out_max = torch.max(out5, 2, keepdim=True)[0]          # out_max: [B, 2048, 1]
             out_max = out_max.view(-1, 2048)                       # out_max: [B, 2048]
             out_max = torch.cat([out_max, label.squeeze(1)], 1)    # out_max: [B, 2064]

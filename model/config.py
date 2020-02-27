@@ -90,7 +90,7 @@ class Config(object):
     # task -> dataset path
     TASK_DATA_PATH = {
             "cls":      os.path.join(os.getcwd(), "data", "modelnet40_normal_resampled"),
-            "part_seg": os.path.join(os.getcwd(), "data", "shapenetcore_partanno_segmentation_benchmark_v0"),
+            "part_seg": os.path.join(os.getcwd(), "data", "shapenetcore_partanno_segmentation_benchmark_v0_normal"),
         }
     # task -> show index
     SHOW_INDEX = {
@@ -151,10 +151,12 @@ class Config(object):
         if value == "cls":
             self.NUM_CLASS = 40
             self.NUM_POINT = 1024
+            self.BATCH_SIZE_PER_GPU = 96
         elif value == "part_seg":
             self.NUM_CLASS = 16
             self.NUM_PART  = 50
             self.NUM_POINT = 2500
+            self.BATCH_SIZE_PER_GPU = 36
 
 
 
