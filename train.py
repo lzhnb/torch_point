@@ -50,12 +50,12 @@ def parse_args():
     # train component
     parser.add_argument(
             "--model", dest="model",
-            type=str, default="pointnet",
+            type=str, default="pointnet2",
             help="model name [default: pointnet]"
         )
     parser.add_argument(
             "--task", dest="task",
-            type=str, default=None,
+            type=str, default="cls",
             help="task in [cls, part_seg]"
         )
     # relative path
@@ -158,8 +158,14 @@ def set_model(DataLoader, device_ids, checkpoints_dir, cfg):
     parameters = DataLoader[-1]
     weights = parameters
 
-    model      = net.PointNet(num_class, num_part, normal_channel=normal, task=task).cuda(device_ids[0])
-    criterion  = net.get_loss(task=task, weights=weights).cuda(device_ids[0])
+    model = getattr(net, cfg.MODEL)
+    model = model(num_class, num_part, normal_channel=normal, task=task).cuda(device_ids[0])
+
+    # if cfg.MODEL == "PointNet":
+    #     model      = net.PointNet(num_class, num_part, normal_channel=normal, task=task).cuda(device_ids[0])
+    # elif cfg.MODEL == "PointNet2":
+    #     model      = net.PointNet2(num_class, num_part, normal_channel=normal, task=task).cuda(device_ids[0])
+    criterion  = net.get_loss(task=task, weights=weights, model=cfg.MODEL).cuda(device_ids[0])
 
     if os.path.exists(os.path.join(checkpoints_dir, "best_model.pth")):
         checkpoint       = torch.load(os.path.join(checkpoints_dir, "best_model.pth"))
@@ -436,6 +442,7 @@ class TrainConfig(Config):
 
 def update_cfg_by_args(args, cfg):
     cfg.EPOCH         = args.epoch
+    cfg.LOG_DIR       = args.log_dir
     cfg.STEP_SIZE     = args.step_size
     cfg.LEARNING_RATE = args.learning_rate
 
@@ -453,9 +460,8 @@ def update_cfg_by_args(args, cfg):
 
         os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(gpu_list)
 
-    cfg.TASK    = args.task
-    cfg.MODEL   = args.model
-    cfg.LOG_DIR = args.log_dir
+    cfg.MODEL = args.model
+    cfg.TASK  = args.task
         
     cfg.display()
 

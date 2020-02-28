@@ -10,12 +10,16 @@ class PointNet(nn.Module):
         The PointNet definement
         Parameters
         ----------
-        cls or seg task: task
-            define the network's task
-        number of output classes: k
+        num_class:
             define the number of PointNet output classes
-        regular STNkd or not: normal_channel
+        part_num:
+            define the part used in part_seg task
+        normal_channel: 
             regular STNkd or not
+        task:
+            define the network's task (cls or part_seg)
+        with_rgb:
+            3 channel or 6 channel in part_seg task
     """
     def __init__(self, num_class=40, part_num=50, normal_channel=True, task="cls", with_rgb=True):
         super(PointNet, self).__init__()
@@ -99,26 +103,25 @@ class PointNet(nn.Module):
         return x, trans_feat
 
 
-class get_loss(nn.Module):
-    def __init__(self, task="cls", weights=None, mat_diff_loss_scale=0.001):
-        super(get_loss, self).__init__()
-        self.task                = task
-        self.weights             = weights
-        self.mat_diff_loss_scale = mat_diff_loss_scale
-
-    def forward(self, pred, target, trans_feat):
-        loss          = F.nll_loss(pred, target, weight=self.weights)
-        mat_diff_loss = feature_transform_reguliarzer(trans_feat)
-        total_loss    = loss + mat_diff_loss * self.mat_diff_loss_scale
-        return total_loss
-
-
 class PointNet2(nn.Module):
-    def __init__(self, num_class, normal_channel=True, task="cls"):
+    """
+        The PointNet2 definement
+        Parameters
+        ----------
+        num_class:
+            define the number of PointNet output classes
+        normal_channel: 
+            regular STNkd or not
+        task:
+            define the network's task (cls or part_seg)
+    """
+    # def __init__(self, num_class, normal_channel=True, task="cls"):
+    def __init__(self, num_class=40, part_num=50, normal_channel=True, task="cls", with_rgb=True):
         super(PointNet2, self).__init__()
         self.task = task
         channel = 3 if normal_channel else 0
         self.normal_channel = normal_channel
+
         self.sa1 = PointNetSetAbstractionMsg(
                 512,
                 [0.1, 0.2, 0.4],
@@ -136,13 +139,14 @@ class PointNet2(nn.Module):
         self.sa3 = PointNetSetAbstraction(
                 None, None, None, 640 + 3, [256, 512, 1024], True
             )
-        self.fc1 = nn.Linear(1024, 512)
-        self.bn1 = nn.BatchNorm1d(512)
+        
+        self.fc1   = nn.Linear(1024, 512)
+        self.bn1   = nn.BatchNorm1d(512)
         self.drop1 = nn.Dropout(0.4)
-        self.fc2 = nn.Linear(512, 256)
-        self.bn2 = nn.BatchNorm1d(256)
+        self.fc2   = nn.Linear(512, 256)
+        self.bn2   = nn.BatchNorm1d(256)
         self.drop2 = nn.Dropout(0.5)
-        self.fc3 = nn.Linear(256, num_class)
+        self.fc3   = nn.Linear(256, num_class)
 
     def forward(self, input_data):
         B, _, _ = input_data.shape
@@ -161,5 +165,21 @@ class PointNet2(nn.Module):
         x = F.log_softmax(x, -1)
 
 
-        return x,l3_points
+        return x, l3_points
+
+
+class get_loss(nn.Module):
+    def __init__(self, task="cls", weights=None, mat_diff_loss_scale=0.001, model="PointNet"):
+        super(get_loss, self).__init__()
+        self.task                = task
+        self.model               = model
+        self.weights             = weights
+        self.mat_diff_loss_scale = mat_diff_loss_scale
+
+    def forward(self, pred, target, trans_feat):
+        loss = F.nll_loss(pred, target, weight=self.weights)
+        if self.model == "PointNet": # only regular in PointNet
+            mat_diff_loss = feature_transform_reguliarzer(trans_feat)
+            loss         += (mat_diff_loss * self.mat_diff_loss_scale)
+        return loss
 

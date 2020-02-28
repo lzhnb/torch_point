@@ -139,15 +139,25 @@ class Config(object):
         self.__TASK     = value
         self.DATA_PATH = self.TASK_DATA_PATH[value]
         if value == "cls":
+            if self.MODEL in ["pointnet", "PointNet"]:
+                self.MODEL = "PointNet"
+                self.BATCH_SIZE_PER_GPU = 96
+            if self.MODEL in ["pointnet2", "PointNet2"]:
+                self.MODEL = "PointNet2"
+                self.BATCH_SIZE_PER_GPU = 24
             self.NUM_CLASS = 40
             self.NUM_POINT = 1024
-            self.BATCH_SIZE_PER_GPU = 96
             self.BATCH_SIZE = self.BATCH_SIZE_PER_GPU * self.NUM_GPU
         elif value == "part_seg":
+            if self.MODEL in ["pointnet", "PointNet"]:
+                self.MODEL = "PointNet"
+                self.BATCH_SIZE_PER_GPU = 48
+            if self.MODEL in ["pointnet2", "PointNet2"]:
+                self.MODEL = "PointNet2"
+                self.BATCH_SIZE_PER_GPU = 12
             self.NUM_CLASS = 16
             self.NUM_PART  = 50
             self.NUM_POINT = 2500
-            self.BATCH_SIZE_PER_GPU = 12
             self.BATCH_SIZE = self.BATCH_SIZE_PER_GPU * self.NUM_GPU
 
     @property
