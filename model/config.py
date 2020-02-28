@@ -69,6 +69,7 @@ class Config(object):
         self.MOMENTUM_DECCAY    = origin_property("MOMENTUM_DECCAY")
         self.MOMENTUM_CLIP      = origin_property("MOMENTUM_CLIP")
         self.MODEL              = origin_property("MODEL")
+        self.SCALE              = origin_property("SCALE")
         self.BATCH_SIZE_PER_GPU = origin_property("BATCH_SIZE_PER_GPU")
 
         # dataset parameters
@@ -99,7 +100,8 @@ class Config(object):
         
         # model define
         self.__TASK = "cls"
-        self.MODEL = "ponitnet" # pointnet or pointnet2
+        self.SCALE  = "msg"
+        self.MODEL  = "ponitnet" # pointnet or pointnet2
 
 
         self.set_label_to_cat()

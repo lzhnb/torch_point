@@ -116,28 +116,57 @@ class PointNet2(nn.Module):
             define the network's task (cls or part_seg)
     """
     # def __init__(self, num_class, normal_channel=True, task="cls"):
-    def __init__(self, num_class=40, part_num=50, normal_channel=True, task="cls", with_rgb=True):
+    def __init__(self, num_class=40, normal_channel=True, task="cls",
+                part_num=50, scale="msg", with_rgb=True):
         super(PointNet2, self).__init__()
-        self.task = task
-        channel = 3 if normal_channel else 0
+        self.task  = task
+        self.scale = "msg"
+        channel = 6 if normal_channel else 3
         self.normal_channel = normal_channel
 
-        self.sa1 = PointNetSetAbstractionMsg(
-                512,
-                [0.1, 0.2, 0.4],
-                [16, 32, 128],
-                channel,
-                [[32, 32, 64], [64, 64, 128], [64, 96, 128]]
-            )
-        self.sa2 = PointNetSetAbstractionMsg(
-                128, 
-                [0.2, 0.4, 0.8],
-                [32, 64, 128],
-                320,
-                [[64, 64, 128], [128, 128, 256], [128, 128, 256]]
-            )
+        if self.scale == "ssg":
+            self.sa1 = PointNetSetAbstraction(
+                    npoint     = 512,
+                    radius     = 0.2,
+                    nsample    = 32,
+                    in_channel = in_channel,
+                    mlp        = [64, 64, 128],
+                    group_all  = False
+                )
+            self.sa2 = PointNetSetAbstraction(
+                    npoint     = 128,
+                    radius     = 0.4,
+                    nsample    = 64,
+                    in_channel = 128 + 3,
+                    mlp        = [128, 128, 256],
+                    group_all  = False
+                )
+                output_size = 256 + 3 # 259
+        elif self.scale == "msg":
+            self.sa1 = PointNetSetAbstractionMsg(
+                    npoint       = 512,
+                    radius_list  = [0.1, 0.2, 0.4],
+                    nsample_list = [16, 32, 128],
+                    in_channel   = channel,
+                    mlp_list     = [[32, 32, 64], [64, 64, 128], [64, 96, 128]]
+                )
+            self.sa2 = PointNetSetAbstractionMsg(
+                    npoint       = 128, 
+                    radius_list  = [0.2, 0.4, 0.8] if self.task == "cls" else [0.4, 0.8],
+                    nsample_list = [32, 64, 128]   if self.task == "cls" else [64, 128],
+                    in_channel   = 320,
+                    mlp_list     = [[64, 64, 128], [128, 128, 256], [128, 128, 256]] if self.task == "cls" \
+                                             else [[128, 128, 256], [128, 196, 256]]
+                )
+                output_size = 128 + 256 + 256 +3 # 643
+
         self.sa3 = PointNetSetAbstraction(
-                None, None, None, 640 + 3, [256, 512, 1024], True
+                npoint     = None,
+                radius     = None,
+                nsample    = None,
+                in_channel = output_size,
+                mlp_list   = [256, 512, 1024],
+                group_all  = True
             )
         
         self.fc1   = nn.Linear(1024, 512)
@@ -164,8 +193,7 @@ class PointNet2(nn.Module):
         x = self.fc3(x)
         x = F.log_softmax(x, -1)
 
-
-        return x, l3_points
+        return x, None
 
 
 class get_loss(nn.Module):

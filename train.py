@@ -54,6 +54,11 @@ def parse_args():
             help="model name [default: pointnet]"
         )
     parser.add_argument(
+            "--scale", dest="scale",
+            type=str, default="msg",
+            help="scale in PointNet2 [default: msg]"
+        )
+    parser.add_argument(
             "--task", dest="task",
             type=str, default="cls",
             help="task in [cls, part_seg]"
@@ -155,16 +160,12 @@ def set_model(DataLoader, device_ids, checkpoints_dir, cfg):
     normal     = cfg.NORMAL
     num_gpu    = cfg.NUM_GPU
     task       = cfg.TASK
+    scale      = cfg.SCALE
     parameters = DataLoader[-1]
     weights = parameters
 
-    model = getattr(net, cfg.MODEL)
-    model = model(num_class, num_part, normal_channel=normal, task=task).cuda(device_ids[0])
-
-    # if cfg.MODEL == "PointNet":
-    #     model      = net.PointNet(num_class, num_part, normal_channel=normal, task=task).cuda(device_ids[0])
-    # elif cfg.MODEL == "PointNet2":
-    #     model      = net.PointNet2(num_class, num_part, normal_channel=normal, task=task).cuda(device_ids[0])
+    model      = getattr(net, cfg.MODEL)
+    model      = model(num_class, num_part, normal_channel=normal, task=task, scale=scale).cuda(device_ids[0])
     criterion  = net.get_loss(task=task, weights=weights, model=cfg.MODEL).cuda(device_ids[0])
 
     if os.path.exists(os.path.join(checkpoints_dir, "best_model.pth")):
@@ -176,7 +177,6 @@ def set_model(DataLoader, device_ids, checkpoints_dir, cfg):
     else:
         logger.log_string("No existing model, starting training from scratch...")
         start_epoch = 0
-
 
     # set optimizer
     if cfg.OPTIMIZER == "Adam":
