@@ -36,9 +36,9 @@ def farthest_point_sample(point, npoint):
     return point
 
 class ModelNetDataLoader(Dataset):
-    def __init__(self, root,  npoints=1024, split='train', uniform=False, normal_channel=True, cache_size=15000):
+    def __init__(self, root,  npoint=1024, split='train', uniform=False, normal_channel=True, cache_size=15000):
         self.root    = root
-        self.npoints = npoints
+        self.npoint  = npoint
         self.uniform = uniform
         self.catfile = os.path.join(self.root, 'modelnet40_shape_names.txt')
 
@@ -72,9 +72,9 @@ class ModelNetDataLoader(Dataset):
             cls = np.array([cls]).astype(np.int32)
             point_set = np.loadtxt(fn[1], delimiter=',').astype(np.float32)
             if self.uniform:
-                point_set = farthest_point_sample(point_set, self.npoints)
+                point_set = farthest_point_sample(point_set, self.npoint)
             else:
-                point_set = point_set[0:self.npoints,:]
+                point_set = point_set[0:self.npoint,:]
 
             point_set[:, 0:3] = pc_normalize(point_set[:, 0:3])
 
@@ -91,8 +91,8 @@ class ModelNetDataLoader(Dataset):
 
 
 class PartNormalDataset(Dataset):
-    def __init__(self,root = './data/shapenetcore_partanno_segmentation_benchmark_v0_normal', npoints=2500, split='train', class_choice=None, normal_channel=False):
-        self.npoints = npoints
+    def __init__(self,root = './data/shapenetcore_partanno_segmentation_benchmark_v0_normal', npoint=2500, split='train', class_choice=None, normal_channel=False):
+        self.npoint  = npoint
         self.root    = root
         self.catfile = os.path.join(self.root, 'synsetoffset2category.txt')
         self.cat     = {}
@@ -172,7 +172,7 @@ class PartNormalDataset(Dataset):
                 self.cache[index] = (point_set, cls, seg)
         point_set[:, 0:3] = pc_normalize(point_set[:, 0:3])
 
-        choice = np.random.choice(len(seg), self.npoints, replace=True)
+        choice = np.random.choice(len(seg), self.npoint, replace=True)
         # resample
         point_set = point_set[choice, :]
         seg = seg[choice]

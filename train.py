@@ -115,15 +115,15 @@ def set_data_loader(logger, cfg):
     weights     = None
 
     if task == "cls":
-        TRAIN_DATASET = ModelNetDataLoader(root=data_path, npoints=cfg.NUM_POINT, split="train",
+        TRAIN_DATASET = ModelNetDataLoader(root=data_path, npoint=cfg.NUM_POINT, split="train",
                                         normal_channel=normal)
-        TEST_DATASET  = ModelNetDataLoader(root=data_path, npoints=cfg.NUM_POINT, split="test",
+        TEST_DATASET  = ModelNetDataLoader(root=data_path, npoint=cfg.NUM_POINT, split="test",
                                         normal_channel=normal)
         weights = None
     elif task == "part_seg":
-        TRAIN_DATASET = PartNormalDataset(root=data_path, npoints=cfg.NUM_POINT, split="trainval",
+        TRAIN_DATASET = PartNormalDataset(root=data_path, npoint=cfg.NUM_POINT, split="trainval",
                                           normal_channel=normal)
-        TEST_DATASET  = PartNormalDataset(root=data_path, npoints=cfg.NUM_POINT, split="test",
+        TEST_DATASET  = PartNormalDataset(root=data_path, npoint=cfg.NUM_POINT, split="test",
                                           normal_channel=normal)
 
     logger.log_string("The number of training data is: %d" % len(TRAIN_DATASET))
@@ -194,14 +194,15 @@ def set_model(DataLoader, device_ids, checkpoints_dir, cfg):
 
 
 def test(model, loader, logger, cfg=None):
+    device = model.output_device
     if cfg.TASK == "cls":
         mean_correct = []
         class_acc    = np.zeros((cfg.NUM_CLASS, 3))
         for batch_id, (points, target) in tqdm(enumerate(loader), total=len(loader), smoothing=0.9):
             target         = target[:, 0]
             points         = points.transpose(2, 1)
-            points         = points.cuda(model.output_device)
-            target         = target.cuda(model.output_device)
+            points         = points.cuda(device)
+            target         = target.cuda(device)
             classifier     = model.eval()
             pred, _        = classifier(points)
             pred_choice    = pred.data.max(1)[1]
@@ -227,11 +228,11 @@ def test(model, loader, logger, cfg=None):
         for batch_id, (points, label, target) in tqdm(enumerate(loader), total=len(loader), smoothing=0.9):
             batch_size, npoint, _ = points.size()
             points      = points.transpose(2, 1)
-            points      = points.float().cuda(model.output_device) # points: [B, 6, npoint]
-            label       = label.long().cuda(model.output_device)   # label:  [B, 1]
-            target      = target.long().cuda(model.output_device)  # target: [B, npoint]
+            points      = points.float().cuda(device) # points: [B, 6, npoint]
+            label       = label.long().cuda(device)   # label:  [B, 1]
+            target      = target.long().cuda(device)  # target: [B, npoint]
             classifier  = model.eval()
-            to_cat      = to_categorical(label, cfg.NUM_CLASS).to(model.output_device) # to_cat: [B, 1, nclass]
+            to_cat      = to_categorical(label, cfg.NUM_CLASS).to(device) # to_cat: [B, 1, nclass]
             pred, _     = classifier([points, to_cat]) # pred: [B, npoint, npart]
             pred        = pred.cpu().data.numpy()
             pred_logits = pred # pred_logits: [B, npoint, npart]
@@ -296,6 +297,7 @@ def train(DataLoader, ModelList, logger, checkpoints_dir, cfg):
     """
     # set model loading
     model, criterion, optimizer, start_epoch = ModelList
+    device = model.output_device
     # set dataset loading
     trainDataLoader, testDataLoader, weights = DataLoader
     # set scheduler
@@ -333,16 +335,16 @@ def train(DataLoader, ModelList, logger, checkpoints_dir, cfg):
             points           = torch.Tensor(points)
             points           = points.transpose(2, 1)
 
-            points = points.cuda(model.output_device)
-            target = target.cuda(model.output_device)
-            if cfg.TASK == "part_seg": label = label.cuda(model.output_device)
+            points = points.cuda(device)
+            target = target.cuda(device)
+            if cfg.TASK == "part_seg": label = label.cuda(device)
             optimizer.zero_grad()
 
             classifier       = model.train()
             if cfg.TASK == "cls":
                 pred, trans_feat = model(points)
             elif cfg.TASK == "part_seg":
-                to_cat           = to_categorical(label, cfg.NUM_CLASS).to(model.output_device)
+                to_cat           = to_categorical(label, cfg.NUM_CLASS).to(device)
                 pred, trans_feat = model([points, to_cat])
                 pred             = pred.contiguous().view(-1, cfg.NUM_PART)
             target      = target.view(-1, 1)[:, 0]
