@@ -190,7 +190,7 @@ class PointNetEncoder(nn.Module):
             out_max = torch.max(out5, 2, keepdim=True)[0]          # out_max: [B, 2048, 1]
             out_max = out_max.view(-1, 2048)                       # out_max: [B, 2048]
             out_max = torch.cat([out_max, label.squeeze(1)], 1)    # out_max: [B, 2064]
-            expand  = out_max.view(-1, 2048+16, 1).repeat(1, 1, N) # expand: [B, 2064, N]
+            expand  = out_max.view(-1, 2048+label.size(-1), 1).repeat(1, 1, N) # expand: [B, 2064, N]
             concat  = torch.cat([expand, out1, out2, out3, out4, out5], 1) # concat: [B, 4944, N]
             return concat, trans, trans_feat
             

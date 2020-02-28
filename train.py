@@ -226,32 +226,34 @@ def test(model, loader, logger, cfg=None):
 
         for batch_id, (points, label, target) in tqdm(enumerate(loader), total=len(loader), smoothing=0.9):
             batch_size, npoint, _ = points.size()
-            points          = points.transpose(2, 1)
-            points          = points.float().cuda(model.output_device)
-            label           = label.long().cuda(model.output_device)
-            target          = target.long().cuda(model.output_device)
-            classifier      = model.eval()
-            to_cat          = to_categorical(label, cfg.NUM_CLASS).to(model.output_device)
-            pred, _         = classifier([points, to_cat])
-            pred            = pred.cpu().data.numpy()
-            pred_logits     = pred
-            target          = target.cpu().data.numpy()
+            points      = points.transpose(2, 1)
+            points      = points.float().cuda(model.output_device) # points: [B, 6, npoint]
+            label       = label.long().cuda(model.output_device)   # label:  [B, 1]
+            target      = target.long().cuda(model.output_device)  # target: [B, npoint]
+            classifier  = model.eval()
+            to_cat      = to_categorical(label, cfg.NUM_CLASS).to(model.output_device) # to_cat: [B, 1, nclass]
+            pred, _     = classifier([points, to_cat]) # pred: [B, npoint, npart]
+            pred        = pred.cpu().data.numpy()
+            pred_logits = pred # pred_logits: [B, npoint, npart]
+            target      = target.cpu().data.numpy()
+
             for i in range(batch_size):
                 cat        = cfg.SEG_LABEL_TO_CAT[target[i, 0]]
-                logits     = pred_logits[i, :, :]
+                logits     = pred_logits[i, :, :] # logits: [npoint, npart]
                 pred[i, :] = np.expand_dims(
                         np.argmax(logits[:, cfg.SEG_CLASSES[cat]], 1) + cfg.SEG_CLASSES[cat][0], axis=-1
                     )
-            correct = np.sum(pred == target)
+                
+            correct        = np.sum(pred == target)
             total_correct += correct
-            total_seen += (batch_size * cfg.NUM_POINT)
+            total_seen    += (batch_size * cfg.NUM_POINT)
 
             for i in range(cfg.NUM_PART):
                 total_seen_class[i]    += np.sum(target == i)
                 total_correct_class[i] += (np.sum(pred==i) & (target==i))
             for i in range(batch_size):
-                segp      = pred[i, :]
-                segl      = target[i, :]
+                segp      = pred[i, :, 0] # segp: [npoint, npart]
+                segl      = target[i, :]  # segl: [npoint]
                 cat       = cfg.SEG_LABEL_TO_CAT[segl[0]]
                 part_ious = [0.0 for _ in range(len(cfg.SEG_CLASSES[cat]))]
                 for l in cfg.SEG_CLASSES[cat]:
@@ -261,26 +263,26 @@ def test(model, loader, logger, cfg=None):
                     else:
                         part_ious[l - cfg.SEG_CLASSES[cat][0]] = \
                             np.sum(
-                                    np.expand_dims((segl == l), axis=-1) & (segp == l) / \
-                                    float(np.sum(np.expand_dims((segl == l), axis=-1) | (segp == l)))
+                                    np.sum((segl == l) & (segp == l)) / \
+                                    np.sum((segl == l) | (segp == l))
                                 )
                                 
                 shape_ious[cat].append(np.mean(part_ious))
 
-            all_shape_ious = []
-            for cat in shape_ious.keys():
-                for iou in shape_ious[cat]:
-                    all_shape_ious.append(iou)
-                shape_ious[cat] = np.mean(shape_ious[cat])
-            mean_shape_ious                    = np.mean(list(shape_ious.values()))
-            test_metrics["accuracy"]           = total_correct / float(total_seen)
-            test_metrics['class_avg_accuracy'] = np.mean(
-                    np.array(total_correct_class) / np.array(total_seen_class, dtype=np.float)
-                )
-            for cat in sorted(shape_ious.keys()):
-                logger.log_string('eval mIoU of %s %f' % (cat + ' ' * (14 - len(cat)), shape_ious[cat]))
-            test_metrics['class_avg_iou']    = mean_shape_ious
-            test_metrics['instance_avg_iou'] = np.mean(all_shape_ious)
+        all_shape_ious = []
+        for cat in shape_ious.keys():
+            for iou in shape_ious[cat]:
+                all_shape_ious.append(iou)
+            shape_ious[cat] = np.mean(shape_ious[cat])
+        mean_shape_ious                    = np.mean(list(shape_ious.values()))
+        test_metrics["accuracy"]           = total_correct / float(total_seen)
+        test_metrics['class_avg_accuracy'] = np.mean(
+                np.array(total_correct_class) / np.array(total_seen_class, dtype=np.float).reshape((-1, 1, 1))
+            )
+        for cat in sorted(shape_ious.keys()):
+            logger.log_string('eval mIoU of %s %f' % (cat + ' ' * (14 - len(cat)), shape_ious[cat]))
+        test_metrics['class_avg_iou']    = mean_shape_ious
+        test_metrics['instance_avg_iou'] = np.mean(all_shape_ious)
 
         return test_metrics
 

@@ -60,7 +60,7 @@ class Config(object):
     MOMENTUM_CLIP     = 0.01
 
     # GPU setting
-    BATCH_SIZE_PER_GPU = 24
+    BATCH_SIZE_PER_GPU = 12
     __NUM_GPU          = 1
 
     # ShapeNet set
@@ -156,7 +156,7 @@ class Config(object):
             self.NUM_CLASS = 16
             self.NUM_PART  = 50
             self.NUM_POINT = 2500
-            self.BATCH_SIZE_PER_GPU = 36
+            self.BATCH_SIZE_PER_GPU = 12
 
 
 
