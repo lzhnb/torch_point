@@ -38,7 +38,7 @@ def farthest_point_sample(point, npoint):
 class ModelNetDataLoader(Dataset):
     def __init__(self, root,  npoints=1024, split='train', uniform=False, normal_channel=True, cache_size=15000):
         self.root    = root
-        self.npoints = npoint
+        self.npoints = npoints
         self.uniform = uniform
         self.catfile = os.path.join(self.root, 'modelnet40_shape_names.txt')
 
@@ -145,7 +145,6 @@ class PartNormalDataset(Dataset):
         for item in self.cat:
             for fn in self.meta[item]:
                 self.datapath.append((item, fn))
-        self.datapath = self.datapath[:24]
 
         self.classes = {}
         for i in self.cat.keys():

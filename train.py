@@ -250,7 +250,7 @@ def test(model, loader, logger, cfg=None):
 
             for i in range(cfg.NUM_PART):
                 total_seen_class[i]    += np.sum(target == i)
-                total_correct_class[i] += (np.sum(pred==i) & (target==i))
+                total_correct_class[i] += np.sum((pred==i) & np.expand_dims((target==i), axis=-1))
             for i in range(batch_size):
                 segp      = pred[i, :, 0] # segp: [npoint, npart]
                 segl      = target[i, :]  # segl: [npoint]
@@ -437,10 +437,6 @@ def update_cfg_by_args(args, cfg):
     cfg.STEP_SIZE     = args.step_size
     cfg.LEARNING_RATE = args.learning_rate
 
-    cfg.TASK    = args.task
-    cfg.MODEL   = args.model
-    cfg.LOG_DIR = args.log_dir
-
     # update gpu
     if torch.cuda.is_available(): # use GPU if available
         if args.gpu == None:
@@ -452,12 +448,16 @@ def update_cfg_by_args(args, cfg):
             gpu_list    = [i for i in gpu_list.split(",")]
             device_ids  = [int(i) for i in gpu_list]
             cfg.NUM_GPU = len(device_ids)
-        
+
         os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(gpu_list)
-        print("set CUDA_VISIBLE_DEVICES: ", ",".join(gpu_list))
-    
-    
+
+    cfg.TASK    = args.task
+    cfg.MODEL   = args.model
+    cfg.LOG_DIR = args.log_dir
+        
     cfg.display()
+
+    print("set CUDA_VISIBLE_DEVICES: {}\n".format(",".join(gpu_list)))
     return device_ids
 
 
