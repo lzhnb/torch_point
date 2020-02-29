@@ -1,4 +1,4 @@
-import os, sys
+import os, sys, json, shutil
 import numpy as np
 import torch
 
@@ -13,6 +13,7 @@ def origin_property(name):
         if value is not None:
             setattr(self, storage_name, value)
     return prop
+
 
 # Base Configuration Class
 # Don"t use this class directly. Instead, sub-class it and override
@@ -55,23 +56,6 @@ class Config(object):
         }
 
     def __init__(self):
-        # define as decorator
-        self.NUM_POINT          = origin_property("NUM_POINT")
-        self.NUM_CLASS          = origin_property("NUM_CLASS")
-        self.NUM_WORKER         = origin_property("NUM_WORKER")
-        self.EPOCH              = origin_property("EPOCH")
-        self.STEP_SIZE          = origin_property("STEP_SIZE")
-        self.LEARNING_RATE      = origin_property("LEARNING_RATE")
-        self.LOG_DIR            = origin_property("LOG_DIR")
-        self.DECAY_RATE         = origin_property("DECAY_RATE")
-        self.OPTIMIZER          = origin_property("OPTIMIZER")
-        self.MOMENTUM_ORIGINAL  = origin_property("MOMENTUM_ORIGINAL")
-        self.MOMENTUM_DECCAY    = origin_property("MOMENTUM_DECCAY")
-        self.MOMENTUM_CLIP      = origin_property("MOMENTUM_CLIP")
-        self.MODEL              = origin_property("MODEL")
-        self.SCALE              = origin_property("SCALE")
-        self.BATCH_SIZE_PER_GPU = origin_property("BATCH_SIZE_PER_GPU")
-
         # dataset parameters
         self.NUM_POINT  = 1024
         self.NUM_CLASS  = 40
@@ -82,7 +66,7 @@ class Config(object):
         self.EPOCH           = 200
         self.STEP_SIZE       = 20
         self.LEARNING_RATE   = 1e-3
-        self.LOG_DIR         = None
+        self.LOG_DIR         = "temp"
         self.NORMAL          = True
         self.DECAY_RATE      = 1e-4
         self.OPTIMIZER       = "Adam"
@@ -93,19 +77,20 @@ class Config(object):
 
         # GPU setting
         self.BATCH_SIZE_PER_GPU = 24
-        self.__NUM_GPU          = 1
+        self.NUM_GPU            = 1
+        self._GPU_LIST          = "0"
         self.BATCH_SIZE         = 24
         
         self.SEG_LABEL_TO_CAT = {}# {0:Airplane, 1:Airplane, ...49:Table}
         
         # model define
-        self.__TASK = "cls"
+        self._TASK  = "cls"
         self.SCALE  = "msg"
-        self.MODEL  = "ponitnet" # pointnet or pointnet2
+        self.MODEL  = "pointnet" # pointnet or pointnet2
 
 
         self.set_label_to_cat()
-        self.DATA_PATH  = self.TASK_DATA_PATH[self.__TASK]
+        self.DATA_PATH  = self.TASK_DATA_PATH[self._TASK]
 
 
     def set_label_to_cat(self):
@@ -115,64 +100,74 @@ class Config(object):
 
     def update(self, cfg_key, args_value):
         if args_value is not None:
-            cfg_value = args_value
+            setattr(self, cfg_key, args_value)
 
     def display(self):
         """Display Configuration values."""
+        context = {}
         print("\nConfigurations:")
+        print("==================start=================")
         for a in dir(self):
             if a in ["SEG_LABEL_TO_CAT", "SEG_CLASSES", "TASK_DATA_PATH", "SHOW_INDEX"]: continue
             elif not a.startswith("_") and not callable(getattr(self, a)):
+                context[a] = getattr(self, a)
                 print("{:30} {}".format(a, getattr(self, a)))
-        print("\n")
+        print("===================end==================\n")
+        with open("./cache.json", "w") as f:
+            json.dump(context, f, indent=4)
 
     # change relative
     @property
     def TASK(self):
-        return self.__TASK
+        return self._TASK
     
     @TASK.setter
     def TASK(self, value):
-        if value is None: return
-        elif not isinstance(value, str):
-            raise ValueError("TASK must be an string!")
-        assert value in ["cls", "part_seg"], "Error task, task must in ['cls', 'part_seg']"
+        if value is not None:
+            if not isinstance(value, str):
+                raise ValueError("TASK must be an string!")
+            assert value in ["cls", "part_seg"], "Error task, task must in ['cls', 'part_seg']"
+            self._TASK = value
+            self.DATA_PATH = self.TASK_DATA_PATH[value]
 
-        self.__TASK     = value
-        self.DATA_PATH = self.TASK_DATA_PATH[value]
-        if value == "cls":
+        if self._TASK == "cls":
             if self.MODEL in ["pointnet", "PointNet"]:
                 self.MODEL = "PointNet"
                 self.BATCH_SIZE_PER_GPU = 96
-            if self.MODEL in ["pointnet2", "PointNet2"]:
-                self.MODEL = "PointNet2"
-                self.BATCH_SIZE_PER_GPU = 24
-            self.NUM_CLASS = 40
-            self.NUM_POINT = 1024
-            self.BATCH_SIZE = self.BATCH_SIZE_PER_GPU * self.NUM_GPU
-        elif value == "part_seg":
-            if self.MODEL in ["pointnet", "PointNet"]:
-                self.MODEL = "PointNet"
-                self.BATCH_SIZE_PER_GPU = 48
-            if self.MODEL in ["pointnet2", "PointNet2"]:
+            elif self.MODEL in ["pointnet2", "PointNet2"]:
                 self.MODEL = "PointNet2"
                 self.BATCH_SIZE_PER_GPU = 12
+            else:
+                raise ValueError("model must be pointnet or pointnet2")
+            self.NUM_CLASS = 40
+            self.NUM_POINT = 1024
+        elif self._TASK == "part_seg":
+            if self.MODEL in ["pointnet", "PointNet"]:
+                self.MODEL = "PointNet"
+                self.BATCH_SIZE_PER_GPU = 24
+            elif self.MODEL in ["pointnet2", "PointNet2"]:
+                self.MODEL = "PointNet2"
+                self.BATCH_SIZE_PER_GPU = 12
+            else:
+                raise ValueError("model must be pointnet or pointnet2")
             self.NUM_CLASS = 16
             self.NUM_PART  = 50
             self.NUM_POINT = 2500
-            self.BATCH_SIZE = self.BATCH_SIZE_PER_GPU * self.NUM_GPU
+        self.BATCH_SIZE = self.BATCH_SIZE_PER_GPU * self.NUM_GPU
 
     @property
-    def NUM_GPU(self):
-        return self.__NUM_GPU
+    def GPU_LIST(self):
+        return  self._GPU_LIST
     
-    @NUM_GPU.setter
-    def NUM_GPU(self, value):
-        if not isinstance(value, int):
-            raise ValueError("GPU count must be an integer!")
-        if value < 1 or value > torch.cuda.device_count():
-            raise ValueError("GPU count must between 1 ~ num_of_gpu!")
-        self.__NUM_GPU   = value
-        self.BATCH_SIZE = self.BATCH_SIZE_PER_GPU * self.NUM_GPU
+    @GPU_LIST.setter
+    def GPU_LIST(self, value):
+        if not isinstance(value, str):
+            raise ValueError("GPU_LIST must be an string!")
+        try:
+            device_ids     = [int(i) for i in value.split(",")]
+            self.NUM_GPU   = len(device_ids)
+            self._GPU_LIST = value
+        except:
+            raise ValueError("gpu_list must match ['0   ' '1,2']")
 
 

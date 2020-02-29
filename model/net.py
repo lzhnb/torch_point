@@ -12,7 +12,7 @@ class PointNet(nn.Module):
         ----------
         num_class:
             define the number of PointNet output classes
-        part_num:
+        num_part:
             define the part used in part_seg task
         normal_channel: 
             regular STNkd or not
@@ -21,7 +21,8 @@ class PointNet(nn.Module):
         with_rgb:
             3 channel or 6 channel in part_seg task
     """
-    def __init__(self, num_class=40, part_num=50, normal_channel=True, task="cls", with_rgb=True):
+    def __init__(self, num_class=40, num_part=50, normal_channel=True, \
+                 task="cls", with_rgb=True, scale=None):
         super(PointNet, self).__init__()
         self.task = task
         if self.task == "cls" and normal_channel:
@@ -43,13 +44,13 @@ class PointNet(nn.Module):
             self.fc2     = nn.Linear(512, 256)
             self.fc3     = nn.Linear(256, self.k)
         elif self.task == "part_seg":
-            self.part_num = part_num
+            self.num_part = num_part
             self.feat  = PointNetEncoder(global_feat=False, feature_transform=True, \
                                          channel=channel, type="plus")
             self.conv1 = nn.Conv1d(4944, 256, 1)
             self.conv2 = nn.Conv1d(256,  256, 1)
             self.conv3 = nn.Conv1d(256,  128, 1)
-            self.conv4 = nn.Conv1d(128,  self.part_num, 1)
+            self.conv4 = nn.Conv1d(128,  self.num_part, 1)
             self.bn1   = nn.BatchNorm1d(256)
             self.bn2   = nn.BatchNorm1d(256)
             self.bn3   = nn.BatchNorm1d(128)
@@ -95,10 +96,10 @@ class PointNet(nn.Module):
             x = F.relu(self.bn1(self.conv1(x)))     # x: [B, 256, N]
             x = F.relu(self.bn2(self.conv2(x)))     # x: [B, 256, N]
             x = F.relu(self.bn3(self.conv3(x)))     # x: [B, 128, N]
-            x = self.conv4(x)                       # x: [B, part_num, N]
-            x = x.transpose(2, 1).contiguous()      # x: [B, N, part_num]
-            x = F.log_softmax(x.view(-1, self.part_num), dim=-1) # x:[B*N, part_num]
-            x = x.view(B, N, self.part_num)         # x: [B, N, part_num]
+            x = self.conv4(x)                       # x: [B, num_part, N]
+            x = x.transpose(2, 1).contiguous()      # x: [B, N, num_part]
+            x = F.log_softmax(x.view(-1, self.num_part), dim=-1) # x:[B*N, num_part]
+            x = x.view(B, N, self.num_part)         # x: [B, N, num_part]
 
         return x, trans_feat
 
@@ -116,59 +117,13 @@ class PointNet2(nn.Module):
             define the network's task (cls or part_seg)
     """
     # def __init__(self, num_class, normal_channel=True, task="cls"):
-    def __init__(self, num_class=40, normal_channel=True, task="cls",
-                part_num=50, scale="msg", with_rgb=True):
+    def __init__(self, num_class=40, num_part=50, normal_channel=True, \
+                 task="cls", with_rgb=True, scale=None):
         super(PointNet2, self).__init__()
         self.task  = task
-        self.scale = "msg"
-        channel = 6 if normal_channel else 3
-        self.normal_channel = normal_channel
+        self.backbone = PointNet2Encoder(normal_channel=normal_channel, scale=scale)
 
-        if self.scale == "ssg":
-            self.sa1 = PointNetSetAbstraction(
-                    npoint     = 512,
-                    radius     = 0.2,
-                    nsample    = 32,
-                    in_channel = in_channel,
-                    mlp        = [64, 64, 128],
-                    group_all  = False
-                )
-            self.sa2 = PointNetSetAbstraction(
-                    npoint     = 128,
-                    radius     = 0.4,
-                    nsample    = 64,
-                    in_channel = 128 + 3,
-                    mlp        = [128, 128, 256],
-                    group_all  = False
-                )
-                output_size = 256 + 3 # 259
-        elif self.scale == "msg":
-            self.sa1 = PointNetSetAbstractionMsg(
-                    npoint       = 512,
-                    radius_list  = [0.1, 0.2, 0.4],
-                    nsample_list = [16, 32, 128],
-                    in_channel   = channel,
-                    mlp_list     = [[32, 32, 64], [64, 64, 128], [64, 96, 128]]
-                )
-            self.sa2 = PointNetSetAbstractionMsg(
-                    npoint       = 128, 
-                    radius_list  = [0.2, 0.4, 0.8] if self.task == "cls" else [0.4, 0.8],
-                    nsample_list = [32, 64, 128]   if self.task == "cls" else [64, 128],
-                    in_channel   = 320,
-                    mlp_list     = [[64, 64, 128], [128, 128, 256], [128, 128, 256]] if self.task == "cls" \
-                                             else [[128, 128, 256], [128, 196, 256]]
-                )
-                output_size = 128 + 256 + 256 +3 # 643
-
-        self.sa3 = PointNetSetAbstraction(
-                npoint     = None,
-                radius     = None,
-                nsample    = None,
-                in_channel = output_size,
-                mlp_list   = [256, 512, 1024],
-                group_all  = True
-            )
-        
+        if self.task == "cls": pass
         self.fc1   = nn.Linear(1024, 512)
         self.bn1   = nn.BatchNorm1d(512)
         self.drop1 = nn.Dropout(0.4)
@@ -178,16 +133,7 @@ class PointNet2(nn.Module):
         self.fc3   = nn.Linear(256, num_class)
 
     def forward(self, input_data):
-        B, _, _ = input_data.shape
-        if self.normal_channel:
-            norm = input_data[:, 3:, :]
-            xyz  = input_data[:, :3, :]
-        else:
-            norm = None
-        l1_xyz, l1_points = self.sa1(xyz, norm)
-        l2_xyz, l2_points = self.sa2(l1_xyz, l1_points)
-        l3_xyz, l3_points = self.sa3(l2_xyz, l2_points)
-        x = l3_points.view(B, 1024)
+        x = self.backbone(input_data)
         x = self.drop1(F.relu(self.bn1(self.fc1(x))))
         x = self.drop2(F.relu(self.bn2(self.fc2(x))))
         x = self.fc3(x)

@@ -254,4 +254,3 @@ def random_point_dropout(batch_pc, max_dropout_ratio=0.875):
     return batch_pc
 
 
-

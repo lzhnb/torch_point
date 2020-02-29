@@ -196,7 +196,7 @@ class PointNetEncoder(nn.Module):
             expand  = out_max.view(-1, 2048+label.size(-1), 1).repeat(1, 1, N) # expand: [B, 2064, N]
             concat  = torch.cat([expand, out1, out2, out3, out4, out5], 1) # concat: [B, 4944, N]
             return concat, trans, trans_feat
-            
+
 
 def feature_transform_reguliarzer(trans):
     # trans [B, k, k]
@@ -372,34 +372,116 @@ class PointNetFeaturePropagation(nn.Module):
         Return:
             new_points: upsampled points data, [B, D', N]
         """
-        xyz1 = xyz1.permute(0, 2, 1)
-        xyz2 = xyz2.permute(0, 2, 1)
+        xyz1 = xyz1.permute(0, 2, 1) # xyz1: [B, N, C]
+        xyz2 = xyz2.permute(0, 2, 1) # xyz2: [B, S, C]
 
-        points2 = points2.permute(0, 2, 1)
+        points2 = points2.permute(0, 2, 1) # points2: [B, S, D]
         B, N, C = xyz1.shape
         _, S, _ = xyz2.shape
 
         if S == 1:
-            interpolated_points = points2.repeat(1, N, 1)
+            interpolated_points = points2.repeat(1, N, 1) # interpolated_points: [B, N, D]
         else:
-            dists = square_distance(xyz1, xyz2)
+            dists      = square_distance(xyz1, xyz2) # dists: [B, N, S]
             dists, idx = dists.sort(dim=-1)
-            dists, idx = dists[:, :, :3], idx[:, :, :3]  # [B, N, 3]
+            dists, idx = dists[:, :, :3], idx[:, :, :3] # [B, N, 3]
 
-            dist_recip = 1.0 / (dists + 1e-8)
-            norm = torch.sum(dist_recip, dim=2, keepdim=True)
-            weight = dist_recip / norm
-            interpolated_points = torch.sum(index_points(points2, idx) * weight.view(B, N, 3, 1), dim=2)
+            dist_recip          = 1.0 / (dists + 1e-8) # [B, N, 3]
+            norm                = torch.sum(dist_recip, dim=2, keepdim=True) # [B, N, 1]
+            weight              = dist_recip / norm    # [B, N, 3]
+            interpolated_points = torch.sum(
+                    index_points(points2, idx) * weight.view(B, N, 3, 1), dim=2
+                ) # interpolated_points: [B, N, 1]
 
         if points1 is not None:
-            points1 = points1.permute(0, 2, 1)
-            new_points = torch.cat([points1, interpolated_points], dim=-1)
+            points1    = points1.permute(0, 2, 1) # points1: [B, N, C]
+            new_points = torch.cat([points1, interpolated_points], dim=-1) # new_points: [B, N, C+1]
         else:
-            new_points = interpolated_points
+            new_points = interpolated_points # new_points: [B, N, 1]
 
-        new_points = new_points.permute(0, 2, 1)
+        new_points = new_points.permute(0, 2, 1) # new_points: [B, D', N]
         for i, conv in enumerate(self.mlp_convs):
-            bn = self.mlp_bns[i]
+            bn         = self.mlp_bns[i]
             new_points = F.relu(bn(conv(new_points)))
         return new_points
+
+
+class PointNet2Encoder(nn.Module):
+    """
+        The PointNet2 basement's combination
+        Parameters
+        ----------
+        normal_channel:
+            Decide the channels of input channel
+        scale: 
+            Use ssg or msg
+    """
+    def __init__(self, normal_channel=True, scale="msg"):
+        super(PointNet2Encoder, self).__init__()
+        self.scale          = scale
+        self.normal_channel = normal_channel
+        if self.scale == "ssg" and self.normal_channel:
+            channel = 6
+        elif self.scale == "msg" and not self.normal_channel:
+            channel = 0
+        else:
+            channel = 3
+
+        if self.scale == "ssg":
+            self.sa1 = PointNetSetAbstraction(
+                    npoint     = 512,
+                    radius     = 0.2,
+                    nsample    = 32,
+                    in_channel = in_channel,
+                    mlp        = [64, 64, 128],
+                    group_all  = False
+                )
+            self.sa2 = PointNetSetAbstraction(
+                    npoint     = 128,
+                    radius     = 0.4,
+                    nsample    = 64,
+                    in_channel = 128 + 3,
+                    mlp        = [128, 128, 256],
+                    group_all  = False
+                )
+            output_size = 256 + 3 # 259
+        elif self.scale == "msg":
+            self.sa1 = PointNetSetAbstractionMsg(
+                    npoint       = 512,
+                    radius_list  = [0.1, 0.2, 0.4],
+                    nsample_list = [16, 32, 128],
+                    in_channel   = channel,
+                    mlp_list     = [[32, 32, 64], [64, 64, 128], [64, 96, 128]]
+                )
+            self.sa2 = PointNetSetAbstractionMsg(
+                    npoint       = 128, 
+                    radius_list  = [0.2, 0.4, 0.8],
+                    nsample_list = [32, 64, 128],
+                    in_channel   = 320,
+                    mlp_list     = [[64, 64, 128], [128, 128, 256], [128, 128, 256]]
+                )
+            output_size = 128 + 256 + 256 +3 # 643
+
+        self.sa3 = PointNetSetAbstraction(
+                npoint     = None,
+                radius     = None,
+                nsample    = None,
+                in_channel = output_size,
+                mlp_list   = [256, 512, 1024],
+                group_all  = True
+            )
+        
+    def forward(self, input_data):
+        B, _, _ = input_data.shape
+        if self.normal_channel:
+            norm = input_data[:, 3:, :]
+            xyz  = input_data[:, :3, :]
+        else:
+            norm = None
+        l1_xyz, l1_points = self.sa1(xyz, norm)
+        l2_xyz, l2_points = self.sa2(l1_xyz, l1_points)
+        l3_xyz, l3_points = self.sa3(l2_xyz, l2_points)
+        x = l3_points.view(B, 1024)
+
+        return x
 

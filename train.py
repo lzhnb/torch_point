@@ -1,6 +1,6 @@
 """Train the model"""
 
-import os, shutil, argparse
+import os, json, shutil, argparse
 import logging, datetime
 from tqdm import *
 from pathlib import Path
@@ -29,45 +29,50 @@ def parse_args():
     parser.add_argument(
             "--gpu", dest="gpu",
             type=str, default=None,
-            help="specify gpu device [default: None] type:1, 1,2(divide by ',')"
+            help="specify gpu device [exapmle: 1, 1,2(divide by ',')]"
         )
     # training parameters
     parser.add_argument(
             "--epoch", dest="epoch",
-            type=int, default=200,
-            help="number of epoch in training [default: 200]"
+            type=int, default=None,
+            help="number of epoch in training [exapmle: 200]"
         )
     parser.add_argument(
             "--step_size", dest="step_size",
-            type=int,  default=20,
-            help="Decay step for lr decay [default: every 20 epochs]"
+            type=int,  default=None,
+            help="Decay step for lr decay [example: every 20 epochs]"
         )
     parser.add_argument(
             "--learning_rate", dest="learning_rate",
-            type=float, default=0.001,
-            help="learning rate in training [default: 0.001]"
+            type=float, default=None,
+            help="learning rate in training [example: 0.001]"
         )
     # train component
     parser.add_argument(
             "--model", dest="model",
-            type=str, default="pointnet2",
-            help="model name [default: pointnet]"
+            type=str, default=None,
+            help="model name [pointnet pointnet2]"
         )
     parser.add_argument(
             "--scale", dest="scale",
-            type=str, default="msg",
-            help="scale in PointNet2 [default: msg]"
+            type=str, default=None,
+            help="scale in PointNet2 [example: msg]"
         )
     parser.add_argument(
             "--task", dest="task",
-            type=str, default="cls",
-            help="task in [cls, part_seg]"
+            type=str, default=None,
+            help="task in [example: cls, part_seg]"
         )
     # relative path
     parser.add_argument(
             "--log_dir", dest="log_dir",
             type=str, default=None,
             help="experiment root"
+        )
+    parser.add_argument(
+            "--json_path", dest="json_path",
+            type=str, default=None,
+            help="use exist training configuration from json_path cover Config"
         )
     return parser.parse_args()
 
@@ -90,7 +95,6 @@ def set_dir(cfg):
         experiment_dir = experiment_dir.joinpath(timestr)
     else:
         experiment_dir = experiment_dir.joinpath(cfg.LOG_DIR)
-        print("use experiment_dir: ", experiment_dir)
     experiment_dir.mkdir(exist_ok=True)
     checkpoints_dir = experiment_dir.joinpath("checkpoints/")
     log_dir         = experiment_dir.joinpath("logs/")
@@ -165,7 +169,8 @@ def set_model(DataLoader, device_ids, checkpoints_dir, cfg):
     weights = parameters
 
     model      = getattr(net, cfg.MODEL)
-    model      = model(num_class, num_part, normal_channel=normal, task=task, scale=scale).cuda(device_ids[0])
+    model      = model(num_class=num_class, num_part=num_part, normal_channel=normal, \
+                       task=task, scale=scale).cuda(device_ids[0])
     criterion  = net.get_loss(task=task, weights=weights, model=cfg.MODEL).cuda(device_ids[0])
 
     if os.path.exists(os.path.join(checkpoints_dir, "best_model.pth")):
@@ -192,7 +197,7 @@ def set_model(DataLoader, device_ids, checkpoints_dir, cfg):
 
     # if num_gpu > 1:
     logger.log_string("Use {} GPU".format(num_gpu))
-    assert torch.cuda.device_count() > num_gpu
+    assert torch.cuda.device_count() >= num_gpu, "Actual GPU is less than you call"
     model     = nn.DataParallel(model, device_ids=device_ids)
     criterion = nn.DataParallel(criterion, device_ids=device_ids)
     
@@ -441,28 +446,35 @@ class TrainConfig(Config):
 
 
 def update_cfg_by_args(args, cfg):
-    cfg.EPOCH         = args.epoch
-    cfg.LOG_DIR       = args.log_dir
-    cfg.STEP_SIZE     = args.step_size
-    cfg.LEARNING_RATE = args.learning_rate
+    try:
+        with open(args.json_path, "r") as f:
+            config = json.load(f)
+        for key, value in config.items():
+            cfg.update(key, value)
+        device_ids  = [int(i) for i in cfg.GPU_LIST.split(",")]
+        gpu_list   = [str(i) for i in device_ids]
+        os.environ["CUDA_VISIBLE_DEVICES"] = cfg.GPU_LIST
+    except:
+        cfg.update("EPOCH",         args.epoch)
+        cfg.update("MODEL",         args.model)
+        cfg.update("LOG_DIR",       args.log_dir)
+        cfg.update("STEP_SIZE",     args.step_size)
+        cfg.update("LEARNING_RATE", args.learning_rate)
+    
+        # update gpu
+        if torch.cuda.is_available(): # use GPU if available
+            if args.gpu == None:
+                device_ids = gpu_utils.supervise_gpu(nb_gpu=cfg.NUM_GPU)
+                gpu_list   = [str(i) for i in device_ids]
+            else:
+                gpu_list    = args.gpu
+                gpu_list    = [i for i in gpu_list.split(",")]
+                device_ids  = [int(i) for i in gpu_list]
 
-    # update gpu
-    if torch.cuda.is_available(): # use GPU if available
-        if args.gpu == None:
-            device_ids = gpu_utils.supervise_gpu(nb_gpu=cfg.NUM_GPU)
-            gpu_list   = [str(i) for i in device_ids]
-            cfg.NUM_GPU = 1
-        else:
-            gpu_list    = args.gpu
-            gpu_list    = [i for i in gpu_list.split(",")]
-            device_ids  = [int(i) for i in gpu_list]
-            cfg.NUM_GPU = len(device_ids)
-
-        os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(gpu_list)
-
-    cfg.MODEL = args.model
-    cfg.TASK  = args.task
+            cfg.GPU_LIST = ",".join(gpu_list)
+            os.environ["CUDA_VISIBLE_DEVICES"] = cfg.GPU_LIST
         
+    cfg.TASK  = args.task
     cfg.display()
 
     print("set CUDA_VISIBLE_DEVICES: {}\n".format(",".join(gpu_list)))
