@@ -13,12 +13,12 @@ import torch.optim as optim
 from torch.autograd import Variable
 
 import utils.data_utils as d_utils
-import model.net as net
-import model.data_loader as data_loader
-from model.config import Config
-from model.data_loader import ModelNetDataLoader, PartNormalDataset
-from utils.model_utils import *
-from utils import gpu_utils
+import lib.model.net as net
+import lib.model.data_loader as data_loader
+from lib.model.data_loader import ModelNetDataLoader, PartNormalDataset
+from lib.utils.module_utils import *
+from lib.utils import gpu_utils
+from lib.config import Config
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -46,6 +46,11 @@ def parse_args():
             "--learning_rate", dest="learning_rate",
             type=float, default=None,
             help="learning rate in training [example: 0.001]"
+        )
+    parser.add_argument(
+            "--batch_size", dest="batch_size",
+            type=int, default=None,
+            help="batch size in training [example: 12]"
         )
     # train component
     parser.add_argument(
@@ -90,6 +95,8 @@ def set_dir(cfg):
     experiment_dir = Path("./log/")
     experiment_dir.mkdir(exist_ok=True)
     experiment_dir = experiment_dir.joinpath(cfg.TASK)
+    experiment_dir.mkdir(exist_ok=True)
+    experiment_dir = experiment_dir.joinpath(cfg.MODEL)
     experiment_dir.mkdir(exist_ok=True)
     if cfg.LOG_DIR is None:
         experiment_dir = experiment_dir.joinpath(timestr)
@@ -323,64 +330,70 @@ def train(DataLoader, ModelList, logger, checkpoints_dir, cfg):
 
     # start training
     logger.log_string("Start training...")
+    
     for epoch in range(start_epoch, cfg.EPOCH):
-        logger.log_string("Epoch {} ({}/{}):".format(current_epoch + 1, epoch + 1, cfg.EPOCH))
         # laerning rate step
         scheduler.step()
         # batch norm momentum step
         momentum = max(cfg.MOMENTUM_ORIGINAL * (cfg.MOMENTUM_DECCAY ** (epoch//cfg.STEP_SIZE)), \
                        cfg.MOMENTUM_CLIP)
-        logger.log_string('BN momentum updated to: {}'.format(momentum))
+        logger.log_string("Epoch {} ({}/{}):    BN momentum updated to: {}".format(
+                current_epoch + 1, epoch + 1, cfg.EPOCH, momentum)
+            )
         model = model.apply(lambda x: bn_momentum_adjust(x,momentum))
-        for batch_id, data in tqdm(enumerate(trainDataLoader, 0), total=len(trainDataLoader), smoothing=0.9):
-            if cfg.TASK == "cls":
-                points, target = data
-                points         = points.data.numpy()
-                points         = d_utils.random_point_dropout(points)
-            elif cfg.TASK == "part_seg":
-                points, label, target = data
-                points                = points.data.numpy()
-            
-            points[:,:, 0:3] = d_utils.random_scale_point_cloud(points[:,:, 0:3])
-            points[:,:, 0:3] = d_utils.shift_point_cloud(points[:,:, 0:3])
-            points           = torch.Tensor(points)
-            points           = points.transpose(2, 1)
+        with tqdm(total=len(trainDataLoader), smoothing=0.9, ncols=120) as t:
+            for batch_id, data in enumerate(trainDataLoader):
+                if cfg.TASK == "cls":
+                    points, target = data
+                    points         = points.data.numpy()
+                    points         = d_utils.random_point_dropout(points)
+                elif cfg.TASK == "part_seg":
+                    points, label, target = data
+                    points                = points.data.numpy()
+                
+                points[:,:, 0:3] = d_utils.random_scale_point_cloud(points[:,:, 0:3])
+                points[:,:, 0:3] = d_utils.shift_point_cloud(points[:,:, 0:3])
+                points           = torch.Tensor(points)
+                points           = points.transpose(2, 1)
+    
+                points = points.cuda(device)
+                target = target.cuda(device)
+                if cfg.TASK == "part_seg": label = label.cuda(device)
+                optimizer.zero_grad()
+    
+                classifier = model.train()
+                if cfg.TASK == "cls":
+                    pred, trans_feat = classifier(points)
+                elif cfg.TASK == "part_seg":
+                    to_cat           = to_categorical(label, cfg.NUM_CLASS).to(device)
+                    pred, trans_feat = classifier([points, to_cat])
+                    pred             = pred.contiguous().view(-1, cfg.NUM_PART)
 
-            points = points.cuda(device)
-            target = target.cuda(device)
-            if cfg.TASK == "part_seg": label = label.cuda(device)
-            optimizer.zero_grad()
-
-            classifier       = model.train()
-            if cfg.TASK == "cls":
-                pred, trans_feat = model(points)
-            elif cfg.TASK == "part_seg":
-                to_cat           = to_categorical(label, cfg.NUM_CLASS).to(device)
-                pred, trans_feat = model([points, to_cat])
-                pred             = pred.contiguous().view(-1, cfg.NUM_PART)
-            target      = target.view(-1, 1)[:, 0]
-            loss        = torch.sum(criterion(pred, target.long(), trans_feat))
-            pred_choice = pred.data.max(1)[1]
-            if target.device != pred_choice.device:
-                pred_choice.to(target.device)
-            
-            correct = pred_choice.eq(target.long().data).cpu().sum()
-            if cfg.TASK == "cls":
-                mean_correct.append(correct.item() / cfg.BATCH_SIZE)
-            elif cfg.TASK == "part_seg":
-                mean_correct.append(correct.item() / (cfg.BATCH_SIZE*cfg.NUM_POINT))
-
-            loss.backward()
-            optimizer.step()
-            global_step += 1
-
+                target = target.view(-1, 1)[:, 0]
+                loss   = torch.sum(criterion(pred, target.long(), trans_feat))
+                t.set_postfix(loss='{:^7.6f}'.format(loss))
+                t.update()
+                pred_choice = pred.data.max(1)[1]
+                if target.device != pred_choice.device:
+                    pred_choice.to(target.device)
+                
+                correct = pred_choice.eq(target.long().data).cpu().sum()
+                if cfg.TASK == "cls":
+                    mean_correct.append(correct.item() / cfg.BATCH_SIZE)
+                elif cfg.TASK == "part_seg":
+                    mean_correct.append(correct.item() / (cfg.BATCH_SIZE*cfg.NUM_POINT))
+    
+                loss.backward()
+                optimizer.step()
+                global_step += 1
+    
         # epoch summary
         train_instance_acc = np.mean(mean_correct)
         logger.log_string("Train Instance Accuracy: {}".format(train_instance_acc))
 
         with torch.no_grad():
             # start test
-            test_output = test(classifier.eval(), testDataLoader, logger, cfg=cfg)
+            test_output = test(model, testDataLoader, logger, cfg=cfg)
             if cfg.TASK == "cls":
                 instance_acc, class_acc = test_output
                 class_label    = class_acc
@@ -395,7 +408,7 @@ def train(DataLoader, ModelList, logger, checkpoints_dir, cfg):
             if class_label > best_class_label:
                 best_class_label = class_label
             if instance_label > best_instance_label:
-                best_inctance_label = instance_label
+                best_instance_label = instance_label
 
             show_index     = cfg.SHOW_INDEX[cfg.TASK]
             logger.log_string("Test Instance {}: {}, Class {}: {}".format(
@@ -406,9 +419,6 @@ def train(DataLoader, ModelList, logger, checkpoints_dir, cfg):
                         show_index, best_instance_label, show_index, best_class_label
                     )
                 )
-
-            logger.log_string("Best class avg mIOU is: {:.5}".format(best_class_label))
-            logger.log_string("Best inctance avg mIOU is: {:.5}".format(best_instance_label))
 
             if(instance_label >= best_instance_label):
                 logger.log_string("Save model...")
@@ -424,10 +434,10 @@ def train(DataLoader, ModelList, logger, checkpoints_dir, cfg):
                 }
 
             torch.save(state, savepath)
-            logger.log_string('Saving model....')
             current_epoch += 1
+            
         
-        logger.log_string("End of training...")
+    logger.log_string("End of training...")
 
 
 class TrainConfig(Config):
@@ -459,6 +469,7 @@ def update_cfg_by_args(args, cfg):
         cfg.update("MODEL",         args.model)
         cfg.update("LOG_DIR",       args.log_dir)
         cfg.update("STEP_SIZE",     args.step_size)
+        cfg.update("BATCH_SIZE",    args.batch_size)
         cfg.update("LEARNING_RATE", args.learning_rate)
     
         # update gpu

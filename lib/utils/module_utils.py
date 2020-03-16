@@ -8,7 +8,8 @@ def bn_momentum_adjust(m, momentum):
 
 # ShapeNet dataset usage
 def to_categorical(y, num_classes):
-    """ 1-hot encodes a tensor """
+    r"""1-hot encodes a tensor 
+    """
     new_y = torch.eye(num_classes)[y.cpu().data.numpy(),]
     if (y.is_cuda):
         return new_y.cuda()
@@ -17,12 +18,12 @@ def to_categorical(y, num_classes):
 
 # PointNet2 partional
 def farthest_point_sample(xyz, npoint):
-    """
-    Input:
-        xyz: pointcloud data, [B, N, 3]
-        npoint: number of samples
-    Return:
-        centroids: sampled pointcloud index, [B, npoint]
+    r"""
+        Input:
+            xyz: pointcloud data, [B, N, 3]
+            npoint: number of samples
+        Return:
+            centroids: sampled pointcloud index, [B, npoint]
     """
     device        = xyz.device
     B, N, C       = xyz.shape
@@ -41,12 +42,12 @@ def farthest_point_sample(xyz, npoint):
 
 
 def index_points(points, idx):
-    """
-    Input:
-        points: input points data, [B, N, C]
-        idx: sample index data, [B, (D1, D2, ..., DN)]
-    Return:
-        new_points:, indexed points data, [B, (D1, D2, ..., DN), C]
+    r"""
+        Input:
+            points: input points data, [B, N, C]
+            idx: sample index data, [B, (D1, D2, ..., DN)]
+        Return:
+            new_points:, indexed points data, [B, (D1, D2, ..., DN), C]
     """
     device          = points.device
     B               = points.shape[0]
@@ -60,20 +61,17 @@ def index_points(points, idx):
 
 
 def square_distance(src, dst):
-    """
-    Calculate Euclid distance between each two points.
-
-    src^T * dst = xn * xm + yn * ym + zn * zm；
-    sum(src^2, dim=-1) = xn*xn + yn*yn + zn*zn;
-    sum(dst^2, dim=-1) = xm*xm + ym*ym + zm*zm;
-    dist = (xn - xm)^2 + (yn - ym)^2 + (zn - zm)^2
-         = sum(src**2,dim=-1)+sum(dst**2,dim=-1)-2*src^T*dst
-
-    Input:
-        src: source points, [B, N, C]
-        dst: target points, [B, M, C]
-    Output:
-        dist: per-point square distance, [B, N, M]
+    r"""Calculate Euclid distance between each two points.
+        src^T * dst = xn * xm + yn * ym + zn * zm；
+        sum(src^2, dim=-1) = xn*xn + yn*yn + zn*zn;
+        sum(dst^2, dim=-1) = xm*xm + ym*ym + zm*zm;
+        dist = (xn - xm)^2 + (yn - ym)^2 + (zn - zm)^2
+            = sum(src**2,dim=-1)+sum(dst**2,dim=-1)-2*src^T*dst
+        Input:
+            src: source points, [B, N, C]
+            dst: target points, [B, M, C]
+        Output:
+            dist: per-point square distance, [B, N, M]
     """
     B, N, _ = src.shape
     _, M, _ = dst.shape
@@ -85,14 +83,14 @@ def square_distance(src, dst):
 
 
 def query_ball_point(radius, nsample, xyz, new_xyz):
-    """
-    Input:s
-        radius: local region radius
-        nsample: max sample number in local region
-        xyz: all points, [B, N, 3]
-        new_xyz: query points, [B, S, 3]
-    Return:
-        group_idx: grouped points index, [B, S, nsample]
+    r"""
+        Input:s
+            radius: local region radius
+            nsample: max sample number in local region
+            xyz: all points, [B, N, 3]
+            new_xyz: query points, [B, S, 3]
+        Return:
+            group_idx: grouped points index, [B, S, nsample]
     """
     device    = xyz.device
     B, N, C   = xyz.shape
@@ -108,17 +106,17 @@ def query_ball_point(radius, nsample, xyz, new_xyz):
 
 
 def sample_and_group(npoint, radius, nsample, xyz, points, returnfps=False):
-    """
-    Input:
-        npoint:  the number of farthest_point_sample
-        radius:  local region radius
-        nsample: max sample number in local region
-        xyz: input points position data, [B, N, 3]
-        points: input points data, [B, N, D]
-        returnfps: return farthest points or not
-    Return:
-        new_xyz: sampled points position data, [B, npoint, nsample, 3]
-        new_points: sampled points data, [B, npoint, nsample, 3+D]
+    r"""
+        Input:
+            npoint:  the number of farthest_point_sample
+            radius:  local region radius
+            nsample: max sample number in local region
+            xyz: input points position data, [B, N, 3]
+            points: input points data, [B, N, D]
+            returnfps: return farthest points or not
+        Return:
+            new_xyz: sampled points position data, [B, npoint, nsample, 3]
+            new_points: sampled points data, [B, npoint, nsample, 3+D]
     """
     B, N, C          = xyz.shape
     S                = npoint
@@ -140,13 +138,13 @@ def sample_and_group(npoint, radius, nsample, xyz, points, returnfps=False):
 
 
 def sample_and_group_all(xyz, points):
-    """
-    Input:
-        xyz: input points position data, [B, N, 3]
-        points: input points data, [B, N, D]
-    Return:
-        new_xyz: sampled points position data, [B, 1, 3]
-        new_points: sampled points data, [B, 1, N, 3+D]
+    r"""
+        Input:
+            xyz: input points position data, [B, N, 3]
+            points: input points data, [B, N, D]
+        Return:
+            new_xyz: sampled points position data, [B, 1, 3]
+            new_points: sampled points data, [B, 1, N, 3+D]
     """
     device      = xyz.device
     B, N, C     = xyz.shape
@@ -157,5 +155,12 @@ def sample_and_group_all(xyz, points):
     else:
         new_points = grouped_xyz
     return new_xyz, new_points
+
+
+# decorate base block
+class Conv1d(nn.Module):
+    def __init__(self):
+        super(Conv1d, self).__init__()
+        pass
 
 

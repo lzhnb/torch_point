@@ -136,7 +136,7 @@ class Config(object):
                 self.BATCH_SIZE_PER_GPU = 96
             elif self.MODEL in ["pointnet2", "PointNet2"]:
                 self.MODEL = "PointNet2"
-                self.BATCH_SIZE_PER_GPU = 12
+                self.BATCH_SIZE_PER_GPU = 18
             else:
                 raise ValueError("model must be pointnet or pointnet2")
             self.NUM_CLASS = 40

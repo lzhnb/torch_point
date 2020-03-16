@@ -1,7 +1,7 @@
 import numpy as np
 
 def normalize_data(batch_data):
-    """ Normalize the batch data, use coordinates of the block centered at origin,
+    r""" Normalize the batch data, use coordinates of the block centered at origin,
         Input:
             BxNxC array
         Output:
@@ -20,7 +20,7 @@ def normalize_data(batch_data):
 
 
 def shuffle_data(data, labels):
-    """ Shuffle data and labels.
+    r""" Shuffle data and labels.
         Input:
           data:  B,N,... numpy array
           label: B,... numpy array
@@ -32,7 +32,7 @@ def shuffle_data(data, labels):
     return data[idx, ...], labels[idx], idx
 
 def shuffle_points(batch_data):
-    """ Shuffle orders of points in each point cloud -- changes FPS behavior.
+    r""" Shuffle orders of points in each point cloud -- changes FPS behavior.
         Use the same shuffling idx for the entire batch.
         Input:
             BxNxC array
@@ -44,7 +44,7 @@ def shuffle_points(batch_data):
     return batch_data[:,idx,:]
 
 def rotate_point_cloud(batch_data):
-    """ Randomly rotate the point clouds to augument the dataset
+    r""" Randomly rotate the point clouds to augument the dataset
         rotation is per shape based along up direction
         Input:
           BxNx3 array, original batch of point clouds
@@ -64,7 +64,7 @@ def rotate_point_cloud(batch_data):
     return rotated_data
 
 def rotate_point_cloud_z(batch_data):
-    """ Randomly rotate the point clouds to augument the dataset
+    r""" Randomly rotate the point clouds to augument the dataset
         rotation is per shape based along up direction
         Input:
           BxNx3 array, original batch of point clouds
@@ -84,12 +84,12 @@ def rotate_point_cloud_z(batch_data):
     return rotated_data
 
 def rotate_point_cloud_with_normal(batch_xyz_normal):
-    ''' Randomly rotate XYZ, normal point cloud.
+    r""" Randomly rotate XYZ, normal point cloud.
         Input:
             batch_xyz_normal: B,N,6, first three channels are XYZ, last 3 all normal
         Output:
             B,N,6, rotated XYZ, normal point cloud
-    '''
+    """
     for k in range(batch_xyz_normal.shape[0]):
         rotation_angle  = np.random.uniform() * 2 * np.pi
         cosval          = np.cos(rotation_angle)
@@ -104,7 +104,7 @@ def rotate_point_cloud_with_normal(batch_xyz_normal):
     return batch_xyz_normal
 
 def rotate_perturbation_point_cloud_with_normal(batch_data, angle_sigma=0.06, angle_clip=0.18):
-    """ Randomly perturb the point clouds by small rotations
+    r""" Randomly perturb the point clouds by small rotations
         Input:
           BxNx6 array, original batch of point clouds and point normals
         Return:
@@ -133,7 +133,7 @@ def rotate_perturbation_point_cloud_with_normal(batch_data, angle_sigma=0.06, an
 
 
 def rotate_point_cloud_by_angle(batch_data, rotation_angle):
-    """ Rotate the point cloud along up direction with certain angle.
+    r""" Rotate the point cloud along up direction with certain angle.
         Input:
           BxNx3 array, original batch of point clouds
         Return:
@@ -152,7 +152,7 @@ def rotate_point_cloud_by_angle(batch_data, rotation_angle):
     return rotated_data
 
 def rotate_point_cloud_by_angle_with_normal(batch_data, rotation_angle):
-    """ Rotate the point cloud along up direction with certain angle.
+    r""" Rotate the point cloud along up direction with certain angle.
         Input:
           BxNx6 array, original batch of point clouds with normal
           scalar, angle of rotation
@@ -178,7 +178,7 @@ def rotate_point_cloud_by_angle_with_normal(batch_data, rotation_angle):
 
 
 def rotate_perturbation_point_cloud(batch_data, angle_sigma=0.06, angle_clip=0.18):
-    """ Randomly perturb the point clouds by small rotations
+    r""" Randomly perturb the point clouds by small rotations
         Input:
           BxNx3 array, original batch of point clouds
         Return:
@@ -205,7 +205,7 @@ def rotate_perturbation_point_cloud(batch_data, angle_sigma=0.06, angle_clip=0.1
 
 
 def jitter_point_cloud(batch_data, sigma=0.01, clip=0.05):
-    """ Randomly jitter points. jittering is per point.
+    r""" Randomly jitter points. jittering is per point.
         Input:
           BxNx3 array, original batch of point clouds
         Return:
@@ -218,7 +218,7 @@ def jitter_point_cloud(batch_data, sigma=0.01, clip=0.05):
     return jittered_data
 
 def shift_point_cloud(batch_data, shift_range=0.1):
-    """ Randomly shift point cloud. Shift is per point cloud.
+    r""" Randomly shift point cloud. Shift is per point cloud.
         Input:
           BxNx3 array, original batch of point clouds
         Return:
@@ -232,7 +232,7 @@ def shift_point_cloud(batch_data, shift_range=0.1):
 
 
 def random_scale_point_cloud(batch_data, scale_low=0.8, scale_high=1.25):
-    """ Randomly scale the point cloud. Scale is per point cloud.
+    r""" Randomly scale the point cloud. Scale is per point cloud.
         Input:
             BxNx3 array, original batch of point clouds
         Return:
@@ -245,7 +245,7 @@ def random_scale_point_cloud(batch_data, scale_low=0.8, scale_high=1.25):
     return batch_data
 
 def random_point_dropout(batch_pc, max_dropout_ratio=0.875):
-    ''' batch_pc: BxNx3 '''
+    """ batch_pc: BxNx3 """
     for b in range(batch_pc.shape[0]):
         dropout_ratio = np.random.random()*max_dropout_ratio # 0~0.875
         drop_idx      = np.where(np.random.random((batch_pc.shape[1]))<=dropout_ratio)[0]

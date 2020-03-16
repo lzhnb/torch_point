@@ -7,7 +7,7 @@ from torch.autograd import Variable
 
 import numpy as np
 
-from utils.model_utils import *
+from lib.utils.module_utils import *
 
 # PointNet partion
 class STN3d(nn.Module):

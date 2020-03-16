@@ -3,7 +3,7 @@
 import torch.nn as nn
 import torch.utils.data
 import torch.nn.functional as F
-from model.basement import *
+from lib.model.basement import *
 
 class PointNet(nn.Module):
     """
