@@ -198,7 +198,7 @@ class Conv1d(_ConvBlock):
         self.add_activation()
 
 class Conv2d(_ConvBlock):
-    def __init__(in_channels, out_channels, kernel_size, bn=False, activation=None,
+    def __init__(self, in_channels, out_channels, kernel_size, bn=False, activation=None,
                  stride=1, padding=0, dilation=1, groups=1, bias=True):
         super(Conv2d, self).__init__(in_channels, out_channels, kernel_size, bn, activation)
         self.module.append(
