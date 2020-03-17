@@ -158,9 +158,81 @@ def sample_and_group_all(xyz, points):
 
 
 # decorate base block
-class Conv1d(nn.Module):
-    def __init__(self):
-        super(Conv1d, self).__init__()
-        pass
+class _ConvBlock(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size, bn=False, activation=None):
+        super(_ConvBlock, self).__init__()
+        self.module     = nn.ModuleList()
+        self.activation = activation
 
+    def add_activation(self):
+        if self.activation == "relu":
+            self.module.append(nn.ReLU(inplace=True))
+        elif self.activation == "sigmoid":
+            self.module.append(nn.Sigmoid())
+        else:
+            pass
+
+    def forward(self, x):
+        for module in self.module:
+            x = module(x)
+        return x
+
+class Conv1d(_ConvBlock):
+    def __init__(self, in_channels, out_channels, kernel_size, bn=False, activation=None,
+                 stride=1, padding=0, dilation=1, groups=1, bias=True):
+        super(Conv1d, self).__init__(in_channels, out_channels, kernel_size, bn, activation)
+        self.module.append(
+                nn.Conv1d(
+                    in_channels  = in_channels,
+                    out_channels = out_channels,
+                    kernel_size  = kernel_size,
+                    stride       = stride,
+                    padding  = padding,
+                    dilation = dilation,
+                    groups   = groups,
+                    bias     = bias
+                )
+            )
+        if bn:
+            self.module.append(nn.BatchNorm1d(out_channels))
+        self.add_activation()
+
+class Conv2d(_ConvBlock):
+    def __init__(in_channels, out_channels, kernel_size, bn=False, activation=None,
+                 stride=1, padding=0, dilation=1, groups=1, bias=True):
+        super(Conv2d, self).__init__(in_channels, out_channels, kernel_size, bn, activation)
+        self.module.append(
+                nn.Conv2d(
+                    in_channels  = in_channels,
+                    out_channels = out_channels,
+                    kernel_size  = kernel_size,
+                    stride       = stride,
+                    padding  = padding,
+                    dilation = dilation,
+                    groups   = groups,
+                    bias     = bias
+                )
+            )
+        if bn:
+            self.module.append(nn.BatchNorm2d(out_channels))
+        self.add_activation()
+
+class FC(nn.Module):
+    def __init__(self, in_channels, out_channels, bn=False, activation=None):
+        super(FC, self).__init__()
+        self.module = nn.ModuleList()
+        self.module.append(nn.Linear(in_channels, out_channels))
+        if bn:
+            self.module.append(nn.BatchNorm1d(out_channels))
+        if activation == "relu":
+            self.module.append(nn.ReLU(inplace=True))
+        elif activation == "sigmoid":
+            self.module.append(nn.Sigmoid(inplace=True))
+        else:
+            pass
+
+    def forward(self, x):
+        for module in self.module:
+            x = module(x)
+        return x
 

@@ -12,7 +12,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.autograd import Variable
 
-import utils.data_utils as d_utils
+import lib.utils.data_utils as d_utils
 import lib.model.net as net
 import lib.model.data_loader as data_loader
 from lib.model.data_loader import ModelNetDataLoader, PartNormalDataset

@@ -7,12 +7,12 @@ from torch.autograd import Variable
 
 import numpy as np
 
+import lib.utils.module_utils as mu
 from lib.utils.module_utils import *
 
 # PointNet partion
 class STN3d(nn.Module):
-    """
-        PointNet basement
+    r"""PointNet basement
         Parameters
         ----------
         channel: 
@@ -20,31 +20,23 @@ class STN3d(nn.Module):
     """
     def __init__(self, channel):
         super(STN3d, self).__init__()
-        self.conv1 = nn.Conv1d(channel, 64,   1)
-        self.conv2 = nn.Conv1d(64,      128,  1)
-        self.conv3 = nn.Conv1d(128,     1024, 1)
-        self.fc1   = nn.Linear(1024, 512)
-        self.fc2   = nn.Linear(512,  256)
-        self.fc3   = nn.Linear(256,  9)
-        self.relu  = nn.ReLU()
-
-        self.bn1 = nn.BatchNorm1d(64)
-        self.bn2 = nn.BatchNorm1d(128)
-        self.bn3 = nn.BatchNorm1d(1024)
-        self.bn4 = nn.BatchNorm1d(512)
-        self.bn5 = nn.BatchNorm1d(256)
+        self.conv1 = mu.Conv1d(channel, 64,   1, bn=True, activation="relu")
+        self.conv2 = mu.Conv1d(64,      128,  1, bn=True, activation="relu")
+        self.conv3 = mu.Conv1d(128,     1024, 1, bn=True, activation="relu")
+        self.fc1   = mu.FC(1024, 512, bn=True, activation="relu")
+        self.fc2   = mu.FC(512,  256, bn=True, activation="relu")
+        self.fc3   = mu.FC(256,  9)
 
     def forward(self, x):
         batchsize = x.size()[0]
-        x = F.relu(self.bn1(self.conv1(x)))  # x: [B, 64, N]
-        x = F.relu(self.bn2(self.conv2(x)))  # x: [B, 128, N]
-        x = F.relu(self.bn3(self.conv3(x)))  # x: [B, 1024, N]
+        x = self.conv1(x) # x: [B, 64, N]
+        x = self.conv2(x) # x: [B, 128, N]
+        x = self.conv3(x) # x: [B, 1024, N]
         x = torch.max(x, 2, keepdim=True)[0] # x: [B, 1024, 1] (max-pooling)
-        x = x.view(-1, 1024)                 # x: [B, 1024]
-
-        x = F.relu(self.bn4(self.fc1(x)))    # x: [B, 512]
-        x = F.relu(self.bn5(self.fc2(x)))    # x: [B, 256]
-        x = self.fc3(x)                      # x: [B, 9]
+        x = x.view(-1, 1024) # x: [B, 1024]
+        x = self.fc1(x)   # x: [B, 512]
+        x = self.fc2(x)   # x: [B, 256]
+        x = self.fc3(x)
 
         iden = Variable(
                 torch.from_numpy(
@@ -64,33 +56,26 @@ class STN3d(nn.Module):
 class STNkd(nn.Module):
     def __init__(self, k=64):
         super(STNkd, self).__init__()
-        self.conv1 = nn.Conv1d(k,   64,   1)
-        self.conv2 = nn.Conv1d(64,  128,  1)
-        self.conv3 = nn.Conv1d(128, 1024, 1)
-        self.fc1   = nn.Linear(1024, 512)
-        self.fc2   = nn.Linear(512,  256)
-        self.fc3   = nn.Linear(256, k * k)
-        self.relu  = nn.ReLU()
-
-        self.bn1 = nn.BatchNorm1d(64)
-        self.bn2 = nn.BatchNorm1d(128)
-        self.bn3 = nn.BatchNorm1d(1024)
-        self.bn4 = nn.BatchNorm1d(512)
-        self.bn5 = nn.BatchNorm1d(256)
+        self.conv1 = mu.Conv1d(k,   64,   1, bn=True, activation="relu")
+        self.conv2 = mu.Conv1d(64,  128,  1, bn=True, activation="relu")
+        self.conv3 = mu.Conv1d(128, 1024, 1, bn=True, activation="relu")
+        self.fc1   = mu.FC(1024, 512, bn=True, activation="relu")
+        self.fc2   = mu.FC(512,  256, bn=True, activation="relu")
+        self.fc3   = mu.FC(256,  k*k)
 
         self.k = k
 
     def forward(self, x):
         batchsize = x.size()[0]
-        x = F.relu(self.bn1(self.conv1(x)))  # x: [B, 64, N]
-        x = F.relu(self.bn2(self.conv2(x)))  # x: [B, 128, N]
-        x = F.relu(self.bn3(self.conv3(x)))  # x: [B, 1024, N]
+        x = self.conv1(x)  # x: [B, 64, N]
+        x = self.conv2(x)  # x: [B, 128, N]
+        x = self.conv3(x)  # x: [B, 1024, N]
         x = torch.max(x, 2, keepdim=True)[0] # x: [B, 1024, 1] (max-pooling)
         x = x.view(-1, 1024)                 # x: [B, 1024]
 
-        x = F.relu(self.bn4(self.fc1(x)))    # x: [B, 512]
-        x = F.relu(self.bn5(self.fc2(x)))    # x: [B, 256]
-        x = self.fc3(x)                      # x: [B, 9]
+        x = self.fc1(x) # x: [B, 512]
+        x = self.fc2(x) # x: [B, 256]
+        x = self.fc3(x) # x: [B, 9]
 
         iden = Variable(
                 torch.from_numpy(
@@ -106,8 +91,7 @@ class STNkd(nn.Module):
 
 
 class PointNetEncoder(nn.Module):
-    """
-        The PointNet basement's combination
+    r"""The PointNet basement's combination
         Parameters
         ----------
         global_feat:
@@ -121,20 +105,14 @@ class PointNetEncoder(nn.Module):
         super(PointNetEncoder, self).__init__()
         self.type  = type
         self.stn   = STN3d(channel)
-        self.conv1 = nn.Conv1d(channel, 64,   1)
-        self.conv2 = nn.Conv1d(64,      128,  1)
-        self.bn1   = nn.BatchNorm1d(64)
-        self.bn2   = nn.BatchNorm1d(128)
+        self.conv1 = mu.Conv1d(channel, 64,  1, bn=True, activation="relu")
+        self.conv2 = mu.Conv1d(64,      128, 1, bn=True, activation="relu")
         if self.type == "base":
-            self.conv3 = nn.Conv1d(128, 1024, 1)
-            self.bn3   = nn.BatchNorm1d(1024)
+            self.conv3 = mu.Conv1d(128, 1024, 1, bn=True)
         elif self.type == "plus":
-            self.conv3 = nn.Conv1d(128, 128, 1)
-            self.conv4 = nn.Conv1d(128, 512, 1)
-            self.conv5 = nn.Conv1d(512, 2048, 1)
-            self.bn3   = nn.BatchNorm1d(128)
-            self.bn4   = nn.BatchNorm1d(512)
-            self.bn5   = nn.BatchNorm1d(2048)
+            self.conv3 = mu.Conv1d(128, 128,  1, bn=True, activation="relu")
+            self.conv4 = mu.Conv1d(128, 512,  1, bn=True, activation="relu")
+            self.conv5 = mu.Conv1d(512, 2048, 1, bn=True)
         
         self.global_feat       = global_feat
         self.feature_transform = feature_transform
@@ -170,11 +148,11 @@ class PointNetEncoder(nn.Module):
         x = x.transpose(2, 1)                # x: [B, D, N]
 
         if self.type == "base":
-            x = F.relu(self.bn1(self.conv1(x)))  # x: [B, 64, N]
+            x = self.conv1(x)                    # x: [B, 64, N]
             x, trans_feat = self._fstn(x)        # x: [B, 64, N] trans_feat: [B, 64, 64]
             pointfeat = x                        # pointfeat: [B, 64, N]
-            x = F.relu(self.bn2(self.conv2(x)))  # x: [B, 128, N]
-            x = self.bn3(self.conv3(x))          # x: [B, 1024, N]
+            x = self.conv2(x)                    # x: [B, 128, N]
+            x = self.conv3(x)                    # x: [B, 1024, N]
             x = torch.max(x, 2, keepdim=True)[0] # x: [B, 1024, 1]
             x = x.view(-1, 1024)                 # x: [B, 1024]
             if self.global_feat:
@@ -184,12 +162,12 @@ class PointNetEncoder(nn.Module):
                 return torch.cat([x, pointfeat], 1), trans, trans_feat
         
         elif self.type == "plus":
-            out1 = F.relu(self.bn1(self.conv1(x)))                 # out1: [B, 64, N]
-            out2 = F.relu(self.bn2(self.conv2(out1)))              # out2: [B, 128, N]
-            out3 = F.relu(self.bn3(self.conv3(out2)))              # out3: [B, 128, N]
-            trans_out, trans_feat = self._fstn(out3)               # trans_out: [B, 128, N] trans_feat: [B, 128, 128]
-            out4 = F.relu(self.bn4(self.conv4(trans_out)))         # out4: [B, 512, N]
-            out5 = self.bn5(self.conv5(out4))                      # out5: [B, 2048, N]
+            out1 = self.conv1(x)                     # out1: [B, 64, N]
+            out2 = self.conv2(out1)                  # out2: [B, 128, N]
+            out3 = self.conv3(out2)                  # out3: [B, 128, N]
+            trans_out, trans_feat = self._fstn(out3) # trans_out: [B, 128, N] trans_feat: [B, 128, 128]
+            out4 = self.conv4(trans_out)             # out4: [B, 512, N]
+            out5 = self.conv5(out4)                  # out5: [B, 2048, N]
             out_max = torch.max(out5, 2, keepdim=True)[0]          # out_max: [B, 2048, 1]
             out_max = out_max.view(-1, 2048)                       # out_max: [B, 2048]
             out_max = torch.cat([out_max, label.squeeze(1)], 1)    # out_max: [B, 2064]
@@ -214,8 +192,7 @@ def feature_transform_reguliarzer(trans):
 
 # PointNet2 partion
 class PointNetSetAbstraction(nn.Module):
-    """
-        The PointNet2's set abstration layer using Single-Scale Grouping
+    r"""The PointNet2's set abstration layer using Single-Scale Grouping
         Parameters
         ----------
         npoint:
@@ -237,16 +214,14 @@ class PointNetSetAbstraction(nn.Module):
         self.radius    = radius
         self.nsample   = nsample
         self.mlp_convs = nn.ModuleList()
-        self.mlp_bns   = nn.ModuleList()
         last_channel   = in_channel
         for out_channel in mlp_list:
-            self.mlp_convs.append(nn.Conv2d(last_channel, out_channel, 1))
-            self.mlp_bns.append(nn.BatchNorm2d(out_channel))
+            self.mlp_convs.append(mu.Conv2d(last_channel, out_channel, 1, bn=True, activation="relu"))
             last_channel = out_channel
         self.group_all = group_all
 
     def forward(self, xyz, points):
-        """
+        r"""
         Input:
             xyz: input points position data, [B, C, N]
             points: input points data, [B, D, N]
@@ -259,24 +234,22 @@ class PointNetSetAbstraction(nn.Module):
             points = points.permute(0, 2, 1) # xyz: [B, N, D]
 
         if self.group_all:
-            new_xyz, new_points = sample_and_group_all(xyz, points)
+            new_xyz, new_points = mu.sample_and_group_all(xyz, points)
         else:
-            new_xyz, new_points = sample_and_group(self.npoint, self.radius, self.nsample, xyz, points)
+            new_xyz, new_points = mu.sample_and_group(self.npoint, self.radius, self.nsample, xyz, points)
         # new_xyz: sampled points position data, [B, npoint, C]
         # new_points: sampled points data, [B, npoint, nsample, C+D]
         new_points = new_points.permute(0, 3, 2, 1) # [B, C+D, nsample,npoint]
-        for i, conv in enumerate(self.mlp_convs):
-            bn = self.mlp_bns[i]
-            new_points =  F.relu(bn(conv(new_points)))
+        for conv in self.mlp_convs:
+            new_points =  conv(new_points)
 
         new_points = torch.max(new_points, 2)[0]
-        new_xyz = new_xyz.permute(0, 2, 1)
+        new_xyz    = new_xyz.permute(0, 2, 1)
         return new_xyz, new_points
 
 
 class PointNetSetAbstractionMsg(nn.Module):
-    """
-        The PointNet2's set abstration layer using Multi-Scale Grouping
+    r"""The PointNet2's set abstration layer using Multi-Scale Grouping
         Parameters
         ----------
         npoint:
@@ -296,26 +269,23 @@ class PointNetSetAbstractionMsg(nn.Module):
         self.radius_list  = radius_list
         self.nsample_list = nsample_list
         self.conv_blocks  = nn.ModuleList()
-        self.bn_blocks    = nn.ModuleList()
         for i in range(len(mlp_list)):
             convs        = nn.ModuleList()
             bns          = nn.ModuleList()
             last_channel = in_channel + 3
             for out_channel in mlp_list[i]:
-                convs.append(nn.Conv2d(last_channel, out_channel, 1))
-                bns.append(nn.BatchNorm2d(out_channel))
+                convs.append(mu.Conv2d(last_channel, out_channel, 1, bn=True, activation="relu"))
                 last_channel = out_channel
             self.conv_blocks.append(convs)
-            self.bn_blocks.append(bns)
 
     def forward(self, xyz, points):
-        """
-        Input:
-            xyz: input points position data, [B, C, N]
-            points: input points data, [B, D, N]
-        Return:
-            new_xyz: sampled points position data, [B, C, S]
-            new_points_concat: sample points feature data, [B, D', S]
+        r"""
+            Input:
+                xyz: input points position data, [B, C, N]
+                points: input points data, [B, D, N]
+            Return:
+                new_xyz: sampled points position data, [B, C, S]
+                new_points_concat: sample points feature data, [B, D', S]
         """
         xyz = xyz.permute(0, 2, 1) # xyz: [B, N, 3]
         if points is not None:
@@ -323,17 +293,17 @@ class PointNetSetAbstractionMsg(nn.Module):
 
         B, N, C         = xyz.shape
         S               = self.npoint
-        farthest_idx    = farthest_point_sample(xyz, S)   # farthest_idx: [B, S]
-        new_xyz         = index_points(xyz, farthest_idx) # new_xyz: [B, S, 3]
+        farthest_idx    = mu.farthest_point_sample(xyz, S)   # farthest_idx: [B, S]
+        new_xyz         = mu.index_points(xyz, farthest_idx) # new_xyz: [B, S, 3]
         new_points_list = []
         # for i, radius in enumerate(self.radius_list):
         for i, (K, radius) in enumerate(zip(self.nsample_list, self.radius_list)):
             # K            = self.nsample_list[i]
-            group_idx    = query_ball_point(radius, K, xyz, new_xyz) # group_idx: [B, S, K]
-            grouped_xyz  = index_points(xyz, group_idx)              # grouped_xyz: [B, S, K, C]
+            group_idx    = mu.query_ball_point(radius, K, xyz, new_xyz) # group_idx: [B, S, K]
+            grouped_xyz  = mu.index_points(xyz, group_idx)              # grouped_xyz: [B, S, K, C]
             grouped_xyz -= new_xyz.view(B, S, 1, C)        # normalize grouped_xyz: [B, S, K, C]
             if points is not None:
-                grouped_points = index_points(points, group_idx)                  # grouped_points: [B, S, K, D]
+                grouped_points = mu.index_points(points, group_idx)                  # grouped_points: [B, S, K, D]
                 grouped_points = torch.cat([grouped_points, grouped_xyz], dim=-1) # grouped_points: [B, S, K, c+D]
             else:
                 grouped_points = grouped_xyz # grouped_points: [B, S, K, C]
@@ -341,8 +311,7 @@ class PointNetSetAbstractionMsg(nn.Module):
             grouped_points = grouped_points.permute(0, 3, 2, 1)  # [B, D, K, S]
             for j in range(len(self.conv_blocks[i])):
                 conv           = self.conv_blocks[i][j]
-                bn             = self.bn_blocks[i][j]
-                grouped_points =  F.relu(bn(conv(grouped_points)))
+                grouped_points =  conv(grouped_points)
             new_points         = torch.max(grouped_points, 2)[0]  # [B, D', S]
             new_points_list.append(new_points) # [B, D', S] * len_list
 
@@ -355,22 +324,20 @@ class PointNetFeaturePropagation(nn.Module):
     def __init__(self, in_channel, mlp):
         super(PointNetFeaturePropagation, self).__init__()
         self.mlp_convs = nn.ModuleList()
-        self.mlp_bns   = nn.ModuleList()
         last_channel   = in_channel
         for out_channel in mlp:
-            self.mlp_convs.append(nn.Conv1d(last_channel, out_channel, 1))
-            self.mlp_bns.append(nn.BatchNorm1d(out_channel))
+            self.mlp_convs.append(mu.Conv1d(last_channel, out_channel, 1, bn=True, activation="relu"))
             last_channel = out_channel
 
     def forward(self, xyz1, xyz2, points1, points2):
-        """
-        Input:
-            xyz1: input points position data, [B, C, N]
-            xyz2: sampled input points position data, [B, C, S]
-            points1: input points data, [B, D, N]
-            points2: input points data, [B, D, S]
-        Return:
-            new_points: upsampled points data, [B, D', N]
+        r"""
+            Input:
+                xyz1: input points position data, [B, C, N]
+                xyz2: sampled input points position data, [B, C, S]
+                points1: input points data, [B, D, N]
+                points2: input points data, [B, D, S]
+            Return:
+                new_points: upsampled points data, [B, D', N]
         """
         xyz1 = xyz1.permute(0, 2, 1) # xyz1: [B, N, C]
         xyz2 = xyz2.permute(0, 2, 1) # xyz2: [B, S, C]
@@ -382,7 +349,7 @@ class PointNetFeaturePropagation(nn.Module):
         if S == 1:
             interpolated_points = points2.repeat(1, N, 1) # interpolated_points: [B, N, D]
         else:
-            dists      = square_distance(xyz1, xyz2) # dists: [B, N, S]
+            dists      = mu.square_distance(xyz1, xyz2) # dists: [B, N, S]
             dists, idx = dists.sort(dim=-1)
             dists, idx = dists[:, :, :3], idx[:, :, :3] # [B, N, 3]
 
@@ -390,7 +357,7 @@ class PointNetFeaturePropagation(nn.Module):
             norm                = torch.sum(dist_recip, dim=2, keepdim=True) # [B, N, 1]
             weight              = dist_recip / norm    # [B, N, 3]
             interpolated_points = torch.sum(
-                    index_points(points2, idx) * weight.view(B, N, 3, 1), dim=2
+                    mu.index_points(points2, idx) * weight.view(B, N, 3, 1), dim=2
                 ) # interpolated_points: [B, N, 1]
 
         if points1 is not None:
@@ -400,15 +367,13 @@ class PointNetFeaturePropagation(nn.Module):
             new_points = interpolated_points # new_points: [B, N, 1]
 
         new_points = new_points.permute(0, 2, 1) # new_points: [B, D', N]
-        for i, conv in enumerate(self.mlp_convs):
-            bn         = self.mlp_bns[i]
-            new_points = F.relu(bn(conv(new_points)))
+        for conv in self.mlp_convs:
+            new_points = conv(new_points)
         return new_points
 
 
 class PointNet2Encoder(nn.Module):
-    """
-        The PointNet2 basement's combination
+    r"""The PointNet2 basement's combination
         Parameters
         ----------
         normal_channel:
