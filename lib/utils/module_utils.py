@@ -218,10 +218,12 @@ class Conv2d(_ConvBlock):
         self.add_activation()
 
 class FC(nn.Module):
-    def __init__(self, in_channels, out_channels, bn=False, activation=None):
+    def __init__(self, in_channels, out_channels, dropout=None, bn=False, activation=None):
         super(FC, self).__init__()
         self.module = nn.ModuleList()
         self.module.append(nn.Linear(in_channels, out_channels))
+        if isinstance(dropout, float):
+            self.module.append(nn.Dropout(p=dropout))
         if bn:
             self.module.append(nn.BatchNorm1d(out_channels))
         if activation == "relu":

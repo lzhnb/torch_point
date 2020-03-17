@@ -3,6 +3,7 @@
 import torch.nn as nn
 import torch.utils.data
 import torch.nn.functional as F
+import lib.utils.module_utils as mu
 from lib.model.basement import *
 
 class PointNet(nn.Module):
@@ -34,36 +35,27 @@ class PointNet(nn.Module):
         else:
             channel = 3
         self.k       = num_class
-        self.bn1     = nn.BatchNorm1d(512)
-        self.bn2     = nn.BatchNorm1d(256)
-        self.dropout = nn.Dropout(p=0.4)
         if self.task == "cls":
             self.feat    = PointNetEncoder(global_feat=True, feature_transform=True, \
                                            channel=channel, type="base")
-            self.fc1     = nn.Linear(1024, 512)
-            self.fc2     = nn.Linear(512, 256)
-            self.fc3     = nn.Linear(256, self.k)
+            self.fc1 = mu.FC(1024, 512, bn=True, activation="relu")
+            self.fc2 = mu.FC(512,  256, dropout=0.4, bn=True, activation="relu")
+            self.fc3 = mu.FC(256,  self.k)
         elif self.task == "part_seg":
             self.num_part = num_part
             self.feat  = PointNetEncoder(global_feat=False, feature_transform=True, \
                                          channel=channel, type="plus")
-            self.conv1 = nn.Conv1d(4944, 256, 1)
-            self.conv2 = nn.Conv1d(256,  256, 1)
-            self.conv3 = nn.Conv1d(256,  128, 1)
-            self.conv4 = nn.Conv1d(128,  self.num_part, 1)
-            self.bn1   = nn.BatchNorm1d(256)
-            self.bn2   = nn.BatchNorm1d(256)
-            self.bn3   = nn.BatchNorm1d(128)
+            self.conv1 = mu.Conv1d(4944, 256, 1, bn=True, activation="relu")
+            self.conv2 = mu.Conv1d(256,  256, 1, bn=True, activation="relu")
+            self.conv3 = mu.Conv1d(256,  128, 1, bn=True, activation="relu")
+            self.conv4 = mu.Conv1d(128,  self.num_part, 1)
         elif self.task == "sem_seg":
             self.feat  = PointNetEncoder(global_feat=False, feature_transform=True, \
                                          channel=channel, type="base")
-            self.conv1 = nn.Conv1d(1088, 512,    1)
-            self.conv2 = nn.Conv1d(512,  256,    1)
-            self.conv3 = nn.Conv1d(256,  128,    1)
-            self.conv4 = nn.Conv1d(128,  self.k, 1)
-            self.bn1   = nn.BatchNorm1d(512)
-            self.bn2   = nn.BatchNorm1d(256)
-            self.bn3   = nn.BatchNorm1d(128)
+            self.conv1 = mu.Conv1d(1088, 512, 1, bn=True, activation="relu")
+            self.conv2 = mu.Conv1d(512,  256, 1, bn=True, activation="relu")
+            self.conv3 = mu.Conv1d(256,  128, 1, bn=True, activation="relu")
+            self.conv4 = mu.Conv1d(128,  self.k, 1)
 
     def forward(self, input_data):
         """
@@ -81,9 +73,9 @@ class PointNet(nn.Module):
             # x:          [B, 1024]
             # trans:      [B, 3, 3]
             # trans_feat: [B, 64, 64]
-            x = F.relu(self.bn1(self.fc1(x)))               # x: [B, 512]
-            x = F.relu(self.bn2(self.dropout(self.fc2(x)))) # x: [B, 256]
-            x = self.fc3(x)                                 # x: [B, k]
+            x = self.fc1(x) # x: [B, 512]
+            x = self.fc2(x) # x: [B, 256]
+            x = self.fc3(x) # x: [B, k]
             x = F.log_softmax(x, dim=-1)
         
         elif self.task == "part_seg":
@@ -93,10 +85,10 @@ class PointNet(nn.Module):
             # x:          [B, 4944, N]
             # trans:      [B, 3, 3]
             # trans_feat: [B, 128, 128]
-            x = F.relu(self.bn1(self.conv1(x)))     # x: [B, 256, N]
-            x = F.relu(self.bn2(self.conv2(x)))     # x: [B, 256, N]
-            x = F.relu(self.bn3(self.conv3(x)))     # x: [B, 128, N]
-            x = self.conv4(x)                       # x: [B, num_part, N]
+            x = self.conv1(x) # x: [B, 256, N]
+            x = self.conv2(x) # x: [B, 256, N]
+            x = self.conv3(x) # x: [B, 128, N]
+            x = self.conv4(x) # x: [B, num_part, N]
             x = x.transpose(2, 1).contiguous()      # x: [B, N, num_part]
             x = F.log_softmax(x.view(-1, self.num_part), dim=-1) # x:[B*N, num_part]
             x = x.view(B, N, self.num_part)         # x: [B, N, num_part]
@@ -124,18 +116,14 @@ class PointNet2(nn.Module):
         self.backbone = PointNet2Encoder(normal_channel=normal_channel, scale=scale)
 
         if self.task == "cls": pass
-        self.fc1   = nn.Linear(1024, 512)
-        self.bn1   = nn.BatchNorm1d(512)
-        self.drop1 = nn.Dropout(0.4)
-        self.fc2   = nn.Linear(512, 256)
-        self.bn2   = nn.BatchNorm1d(256)
-        self.drop2 = nn.Dropout(0.5)
-        self.fc3   = nn.Linear(256, num_class)
+        self.fc1 = mu.FC(1024, 512, dropout=0.4, bn=True, activation="relu")
+        self.fc2 = mu.FC(512,  256, dropout=0.5, bn=True, activation="relu")
+        self.fc3 = mu.FC(256, num_class)
 
     def forward(self, input_data):
         x = self.backbone(input_data)
-        x = self.drop1(F.relu(self.bn1(self.fc1(x))))
-        x = self.drop2(F.relu(self.bn2(self.fc2(x))))
+        x = self.fc1(x)
+        x = self.fc2(x)
         x = self.fc3(x)
         x = F.log_softmax(x, -1)
 

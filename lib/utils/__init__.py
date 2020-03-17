@@ -1,2 +1,2 @@
 from . import data_utils
-from . import model_utils
+from . import module_utils

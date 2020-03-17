@@ -133,7 +133,7 @@ class Config(object):
         if self._TASK == "cls":
             if self.MODEL in ["pointnet", "PointNet"]:
                 self.MODEL = "PointNet"
-                self.BATCH_SIZE_PER_GPU = 128
+                self.BATCH_SIZE_PER_GPU = 160
             elif self.MODEL in ["pointnet2", "PointNet2"]:
                 self.MODEL = "PointNet2"
                 self.BATCH_SIZE_PER_GPU = 18

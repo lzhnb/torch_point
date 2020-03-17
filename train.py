@@ -428,7 +428,7 @@ def train(DataLoader, ModelList, logger, checkpoints_dir, cfg):
                     "epoch":                epoch+1,
                     "train_acc":            train_instance_acc,
                     "class_avg_label":      class_label,
-                    "inctance_avg_label":   instance_label,
+                    "instance_avg_label":   instance_label,
                     "model_state_dict":     classifier.state_dict(),
                     "optimizer_state_dict": optimizer.state_dict(),
                 }
